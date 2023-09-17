@@ -101,33 +101,51 @@ class MDP():
         self.V = V
         self.extract_policy()
         
-        if need_return:
-            return V_list
+        return V_list
                 
                 
     def policy_iteration(self,
-                         max_iter=100):
+                         max_iter=100,
+                         need_return=False,
+                         silence=False):
         '''
         策略迭代算法计算最佳策略。
         参数：
             max_iter:
                 迭代次数的上限。
+            need_return:
+                是否需要返回V_list？
+            silence:
+                是否不输出任何信息？
         '''        
         
         iter = 0
+        V_list = [self.V.copy()]
         while True:
             iter += 1
+            V_old = self.V.copy()
             self.evaluate_policy()
-            policy_old = self.policy.copy()
+            V_new = self.V.copy()
+            V_list.append(V_new)
+            
+            if np.linalg.norm(V_new - V_old, ord=np.inf) < 1e-13:
+                if not silence:
+                    print("策略迭代收敛，迭代次数为：%d" % iter)
+                break                
+            
+            # policy_old = self.policy.copy()
             self.extract_policy()
             
-            if policy_old == self.policy:
-                print("策略迭代收敛，迭代次数为：%d" % iter)
-                break
+            # if policy_old == self.policy:
+            #     print("策略迭代收敛，迭代次数为：%d" % iter)
+            #     break
                 
-            elif iter >= max_iter:
-                print("策略迭代未收敛！")
+            if iter >= max_iter:
+                if not silence:
+                    print("策略迭代未收敛！")
                 break
+            
+        return V_list
         
     
     def evaluate_policy(self, epsilon=None):
@@ -548,7 +566,29 @@ class MDP():
                 
         if need_return: return V_list        
                                   
+    
+    def compute_delta(self):
+        '''
+        计算Delta值
+        (请在self.V和self.policy都已经收敛的情况下调用)
+        Delta = \min_{s, a\not\in A^*_s} |A(s,a)|
+              = \min_{s, a\not\in A^*_s}  Q(s,a^*) - Q(s,a)
+        '''
         
+        Q_table = np.zeros((self.S_size, self.A_size), dtype=np.float64)
+        
+        # Naive loop.
+        for s in range(self.S_size):
+            for a in range(self.A_size):
+                Q_table[s, a] = np.dot(self.P[a, s, :], self.rewards[a, s, :] + self.gamma * self.V)
+        
+        abs_A = self.V.reshape((-1,1)) - Q_table
+        abs_A[abs_A < 1e-13] = 1e+15
+        Delta_s = np.min(abs_A, axis=1)
+        Delta = np.min(Delta_s)
+        
+        return Delta
+    
             
 if __name__ == '__main__':
     

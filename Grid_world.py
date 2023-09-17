@@ -31,7 +31,7 @@ class Grid_world():
             五个动作已经按照默认排序。按照“上下左右停”来排序。
         '''
         
-        print("Building Grid world!")
+        # print("Building Grid world!")
         
         self.board = board.astype(np.uint8)
         self.H, self.W = board.shape
@@ -127,7 +127,8 @@ class Grid_world():
                   epsilon=1e-7,
                   asynchronous=False,
                   init=False,
-                  verbose=False):
+                  verbose=False,
+                  need_return=False):
         '''
         求解Grid world问题。
         参数：
@@ -143,6 +144,8 @@ class Grid_world():
                 是否在求解前将MDP的V和policy进行初始化？
             verbose:
                 是否进行plt的show输出？
+            need_return:
+                是否返回V_list？
         '''
         
         assert mode in ["value_iteration", "policy_iteration"], "Param mode must be 'value_iteration' or 'policy_iteration'!"
@@ -150,15 +153,21 @@ class Grid_world():
         if init:
             self.mdp.init_policy_and_V(random_init=True)
         
-        print("Solving!")
+        if not verbose:
+            print("Solving!")
         
         if mode == "value_iteration":
-            self.mdp.value_iteration(epsilon=epsilon, max_iter=max_iter, asynchronous=asynchronous)
+            V_list = self.mdp.value_iteration(epsilon=epsilon, max_iter=max_iter, asynchronous=asynchronous,
+                                              need_return=need_return, silence=verbose)
         else:
-            self.mdp.policy_iteration(max_iter=max_iter)
+            V_list = self.mdp.policy_iteration(max_iter=max_iter,
+                                              need_return=need_return, silence=verbose)
         
         if not verbose:
             self.visualize_policy()
+            
+        if need_return:
+            return V_list
         
     
     def solve_mdp_using_MC_Learning(self,
@@ -377,7 +386,16 @@ class Grid_world():
             ct += 1
             if ct % self.W == 0:
                 print("\n")
+                
+    
+    def compute_delta(self):
+        '''
+        计算Delta值
+        '''
         
+        Delta = self.mdp.compute_delta()
+        
+        return Delta
     
 
 if __name__ == '__main__':
@@ -403,8 +421,9 @@ if __name__ == '__main__':
     # ], dtype=np.uint8)
     
     random.seed(21)
+    H = 500; W = 5
     # board = generate_random_board(10, 10, .2, .05)
-    board = generate_one_goal_board(30, 30)
+    board = generate_one_goal_board(H, W)
     
     gamma = .9
     win_reward = 1,
@@ -443,3 +462,17 @@ if __name__ == '__main__':
     # plt.axhline(baseline_V, color='blue')
     # plt.legend()
     # plt.show()
+    
+    print("State Size: %d" % (H*W))
+    
+    Delta = one_grid_world.compute_delta()
+    print("Delta: %f" % Delta)
+    
+    Delta_theory = gamma ** (H+W-3) * (1-gamma)
+    print("Delta theory: %f" % Delta_theory)
+    
+    ori_upper_bound = ((H*W)*5 - 5) / (1-gamma) * np.log(1/(1-gamma))
+    print("Ori upper bound: %f" % ori_upper_bound)
+    
+    upper_bound = np.log(2/(Delta_theory * (1-gamma))) / (1-gamma)
+    print("Upper bound: %f" % upper_bound)
