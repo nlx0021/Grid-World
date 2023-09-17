@@ -146,6 +146,16 @@ class MDP():
                 break
             
         return V_list
+    
+    
+    def policy_descent(self):
+        
+        pass
+    
+    
+    def projected_Q_descent(self):
+        
+        pass
         
     
     def evaluate_policy(self, epsilon=None):
@@ -178,6 +188,9 @@ class MDP():
         V_pi = np.linalg.inv(np.eye(self.S_size) - gamma * P_pi) @ r_pi.reshape((-1,1))
         self.V = V_pi.reshape((-1,))
         
+        Q_pi = np.stack([np.diag(_) for _ in np.einsum('ijk,ikl->ijl', P, np.transpose(rewards, [0,2,1]) + gamma*self.V.reshape((-1,1)))])
+        self.Q = Q_pi.transpose()
+        
     
     def extract_policy(self):
         '''
@@ -192,17 +205,20 @@ class MDP():
         
         ''' Element-wise form. '''
         
-        # for s in range(self.S_size):
-        #     temp = []
-        #     for a in range(self.A_size):
-        #         q = np.dot(P[a, s, :], rewards[a, s, :] + gamma * V)
-        #         temp.append(q)
-        #     policy[s] = np.argmax(np.array(temp))
+        for s in range(self.S_size):
+            temp = []
+            for a in range(self.A_size):
+                q = np.dot(P[a, s, :], rewards[a, s, :] + gamma * V)
+                temp.append(q)
+            # policy[s] = np.argmax(np.array(temp))                            #FIXME: 默认选择第一个最大动作
+            policy[s] = np.random.choice(
+                [idx for idx, q in enumerate(temp) if np.abs(q - max(temp)) < 1e-23]
+            )
         
         ''' Vector form. '''
         
-        policy_vec = np.diag(np.argmax(np.einsum('ijk,ikl->ijl', P, np.transpose(rewards, [0,2,1]) + gamma*V.reshape((-1,1))), axis=0))     
-        for s in range(self.S_size): policy[s] = policy_vec[s]
+        # policy_vec = np.diag(np.argmax(np.einsum('ijk,ikl->ijl', P, np.transpose(rewards, [0,2,1]) + gamma*V.reshape((-1,1))), axis=0))     
+        # for s in range(self.S_size): policy[s] = policy_vec[s]               #FIXME: 默认选择第一个最大动作
             
 
     def init_policy_and_V(self, random_init=False, seed=None):
@@ -210,10 +226,12 @@ class MDP():
         if seed is not None: self.set_seed(seed)
         
         self.V = np.zeros((self.S_size, ), dtype=np.float32)      # Initialize V-values.
+        self.Q = np.zeros((self.S_size, self.A_size), dtype=np.float32)
         self.policy = {state: 0 for state in range(self.S_size)}  # Initialize policy.
         
         if random_init:
             self.V = np.random.uniform(size=(self.S_size, ))
+            self.Q = np.random.uniform(size=(self.S_size, self.A_size))
             self.policy = {state: random.randint(0, self.A_size-1) for state in range(self.S_size)}
             
     

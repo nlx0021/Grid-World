@@ -421,7 +421,7 @@ if __name__ == '__main__':
     # ], dtype=np.uint8)
     
     random.seed(21)
-    H = 500; W = 5
+    H = 25; W = 5
     # board = generate_random_board(10, 10, .2, .05)
     board = generate_one_goal_board(H, W)
     
@@ -436,7 +436,7 @@ if __name__ == '__main__':
     
     one_grid_world.solve_mdp(mode="policy_iteration",
                              init=True)
-    
+    import pdb; pdb.set_trace()
     # V_list_1, _ = one_grid_world.solve_mdp_using_MC_Learning(mode="Off-policy", max_iter=10000, epsilon=.1, verbose=True)
     # V_list_2, _ = one_grid_world.solve_mdp_using_MC_Learning(mode="Off-policy", max_iter=10000, epsilon=.5, verbose=True)
     # V_list_3, baseline_V = one_grid_world.solve_mdp_using_MC_Learning(mode="Off-policy", max_iter=10000, epsilon=1, verbose=True)
