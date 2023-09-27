@@ -2,6 +2,8 @@ import numpy as np
 import random
 from tqdm import tqdm
 
+from utils.utils import compute_visit_prob
+
 class MDP():
     
     def __init__(self,
@@ -148,40 +150,121 @@ class MDP():
         return V_list
     
     
-    def policy_descent(self):
+    def projected_Q_descent(self,
+                            max_iter=1000,
+                            step_size=1,
+                            need_return=False,
+                            silence=False,
+                            mode="projected_Q_descent"):
+        '''
+        Projected Q-descent算法。
+        参数：
+            max_iter:
+                迭代次数的上限。
+            step_size:
+                步长值。
+            need_return:
+                是否需要返回V_list？
+            silence:
+                是否不输出任何信息？    
+        '''
         
-        pass
-    
-    
-    def projected_Q_descent(self):
+        def proj_to_simplex(prob_policy):
+            
+            for s in range(self.S_size):
+                _policy_s = prob_policy[s]
+                _policy_s_sorted = np.sort(_policy_s)
+                
+                for i in range(self.A_size-1, 0, -1):
+                    t_i = (np.sum(_policy_s_sorted[i:]) - 1) / (self.A_size - i)
+                    if t_i >= _policy_s_sorted[i-1]:
+                        t = t_i
+                        break
+                
+                else:
+                    t = (np.sum(_policy_s_sorted) - 1) / self.A_size
+                
+                prob_policy[s] = np.clip(_policy_s - t, a_min=0, a_max=1)
+                prob_policy[s] = prob_policy[s] / np.sum(prob_policy[s])
+
+            return prob_policy
+                
+                
+        iter = 0
+        V_list = []
         
-        pass
+        # First we run a baseline.
+        self.policy_iteration(max_iter=1000,
+                              silence=True)
+        
+        V_star = self.V.copy()
+        
+        self.init_policy_and_V(random_init=True)
+        
+        while True:
+            iter += 1
+            self.evaluate_policy(use_prob_policy=True)
+            V_new = self.V.copy()
+            V_list.append(V_new)
+            
+            if np.linalg.norm(V_new - V_star, ord=np.inf) < 1e-13:
+                if not silence:
+                    print("Q下降算法收敛，迭代次数为：%d" % iter)
+                break             
+            
+            if mode == "projected_Q_descent":
+                self.prob_policy = proj_to_simplex(self.prob_policy + step_size * self.Q)
+            elif mode == "policy_descent":
+                # If we use policy gradient, then we need to compute visit prob.
+                d = compute_visit_prob(self.P,
+                                       self.prob_policy,
+                                       init_dist=np.ones((self.S_size, )) / self.S_size,
+                                       gamma=self.gamma)   
+                self.prob_policy = proj_to_simplex(self.prob_policy + step_size / (1-self.gamma) * d.reshape((-1,1)) * self.Q)             
+            
+            if iter >= max_iter:
+                if not silence:
+                    print("策略迭代未收敛！")
+                break
+            
+        return V_list            
         
     
-    def evaluate_policy(self, epsilon=None):
+    def evaluate_policy(self, epsilon=None,
+                        use_prob_policy=False):
         '''
         从策略中计算出对应的效用值。
         若epsilon指定，则对epsilon-greedy policy进行评估
+        若use_prob_policy指定，则对概率策略进行评估
         '''
+        
+        assert not ((epsilon is not None) and use_prob_policy)
         
         P = self.P
         rewards = self.rewards
         gamma = self.gamma
-        policy = self.policy        
+        policy = self.policy  
+        prob_policy = self.prob_policy      
         
         # V_pi = np.linalg.inv(I - gamma * P_pi) @ r_pi
         r_all = np.sum(P * rewards, axis=2)
         r_pi = np.zeros_like(r_all[0])      # Size: [S_size]
         for s in range(self.S_size):
             if epsilon is None:
-                r_pi[s] = r_all[policy[s], s]
+                if not use_prob_policy:
+                    r_pi[s] = r_all[policy[s], s]
+                else:
+                    r_pi[s] = np.dot(r_all[:, s], prob_policy[s, :])
             else:
                 r_pi[s] = (1-epsilon) * r_all[policy[s], s] + epsilon/self.A_size * np.sum(r_all[:, s], axis=0)
             
         P_pi = np.zeros_like(P[0])          # Size: [S_size, S_size]
         for s in range(self.S_size):
             if epsilon is None:
-                P_pi[s, :] = P[policy[s], s, :]
+                if not use_prob_policy:
+                    P_pi[s, :] = P[policy[s], s, :]
+                else:
+                    P_pi[s, :] = np.dot(prob_policy[s, :], P[:, s, :]).reshape((-1,))
             else:
                 P_pi[s, :] = (1-epsilon) * P[policy[s], s, :] + epsilon/self.A_size * np.sum(P[:, s, :], axis=0)
         
@@ -190,6 +273,13 @@ class MDP():
         
         Q_pi = np.stack([np.diag(_) for _ in np.einsum('ijk,ikl->ijl', P, np.transpose(rewards, [0,2,1]) + gamma*self.V.reshape((-1,1)))])
         self.Q = Q_pi.transpose()
+        
+        # We need to synchronize the policy and prob_policy.
+        if use_prob_policy:
+            for s in range(self.S_size): self.policy[s] = np.random.choice(self.A_size, p=prob_policy[s,:])
+        else:
+            self.prob_policy = 0 * self.prob_policy
+            for s, a in self.policy.items(): self.prob_policy[s,a] = 1
         
     
     def extract_policy(self):
@@ -228,11 +318,14 @@ class MDP():
         self.V = np.zeros((self.S_size, ), dtype=np.float32)      # Initialize V-values.
         self.Q = np.zeros((self.S_size, self.A_size), dtype=np.float32)
         self.policy = {state: 0 for state in range(self.S_size)}  # Initialize policy.
+        self.prob_policy = np.zeros((self.S_size, self.A_size), dtype=np.float32)
         
         if random_init:
             self.V = np.random.uniform(size=(self.S_size, ))
             self.Q = np.random.uniform(size=(self.S_size, self.A_size))
             self.policy = {state: random.randint(0, self.A_size-1) for state in range(self.S_size)}
+            self.prob_policy = np.random.uniform(size=(self.S_size, self.A_size))
+            self.prob_policy = self.prob_policy / np.sum(self.prob_policy, axis=1, keepdims=True)
             
     
     def init_policy_with_Q_table(self, Q_table):

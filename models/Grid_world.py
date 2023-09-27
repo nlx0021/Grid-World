@@ -3,8 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pylab import xticks, yticks
 
-from MDP import MDP
-from random_board import generate_random_board, generate_one_goal_board
+from core.MDP import MDP
+from utils.random_board import generate_random_board, generate_one_goal_board
 
 class Grid_world():
     
@@ -125,6 +125,7 @@ class Grid_world():
                   mode="value_iteration",
                   max_iter=10000,
                   epsilon=1e-7,
+                  step_size=1,
                   asynchronous=False,
                   init=False,
                   verbose=False,
@@ -138,6 +139,8 @@ class Grid_world():
                 最大迭代数。
             epsilon:
                 终止误差阈值。
+            step_size (只对Q-descent类算法有效):
+                步长。
             asynchoronous:
                 是否采用异步更新 (仅针对value iteration)
             init:
@@ -148,7 +151,7 @@ class Grid_world():
                 是否返回V_list？
         '''
         
-        assert mode in ["value_iteration", "policy_iteration"], "Param mode must be 'value_iteration' or 'policy_iteration'!"
+        assert mode in ["value_iteration", "policy_iteration", "projected_Q_descent", "policy_descent"]
         
         if init:
             self.mdp.init_policy_and_V(random_init=True)
@@ -159,9 +162,15 @@ class Grid_world():
         if mode == "value_iteration":
             V_list = self.mdp.value_iteration(epsilon=epsilon, max_iter=max_iter, asynchronous=asynchronous,
                                               need_return=need_return, silence=verbose)
-        else:
+        elif mode == "policy_iteration":
             V_list = self.mdp.policy_iteration(max_iter=max_iter,
                                               need_return=need_return, silence=verbose)
+        elif mode == "projected_Q_descent":
+            V_list = self.mdp.projected_Q_descent(max_iter=max_iter, step_size=step_size,
+                                                  need_return=need_return, silence=verbose)
+        elif mode == "policy_descent":
+            V_list = self.mdp.projected_Q_descent(max_iter=max_iter, step_size=step_size,
+                                                  need_return=need_return, silence=verbose, mode="policy_descent")
         
         if not verbose:
             self.visualize_policy()
@@ -421,22 +430,26 @@ if __name__ == '__main__':
     # ], dtype=np.uint8)
     
     random.seed(21)
-    H = 25; W = 5
-    # board = generate_random_board(10, 10, .2, .05)
-    board = generate_one_goal_board(H, W)
+    H = 10; W = 10
+    board = generate_random_board(10, 10, .1, .005)
+    # board = generate_one_goal_board(H, W)
     
     gamma = .9
     win_reward = 1,
-    punish_reward = -10
+    punish_reward = -5
     
     one_grid_world = Grid_world(board,
                                 gamma,
                                 win_reward,
                                 punish_reward)
     
-    one_grid_world.solve_mdp(mode="policy_iteration",
-                             init=True)
+    # one_grid_world.solve_mdp(mode="policy_iteration",
+    #                          init=True)
+    
+    one_grid_world.solve_mdp(mode="policy_descent",
+                             init=True, step_size=10)    
     import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
     # V_list_1, _ = one_grid_world.solve_mdp_using_MC_Learning(mode="Off-policy", max_iter=10000, epsilon=.1, verbose=True)
     # V_list_2, _ = one_grid_world.solve_mdp_using_MC_Learning(mode="Off-policy", max_iter=10000, epsilon=.5, verbose=True)
     # V_list_3, baseline_V = one_grid_world.solve_mdp_using_MC_Learning(mode="Off-policy", max_iter=10000, epsilon=1, verbose=True)

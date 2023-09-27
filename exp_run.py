@@ -4,14 +4,16 @@ import matplotlib.pyplot as plt
 from pylab import xticks, yticks
 from tqdm import tqdm
 
-from MDP import MDP
-from random_board import generate_random_board, generate_one_goal_board
-from Grid_world import Grid_world
+from core.MDP import MDP
+from utils.random_board import generate_random_board, generate_one_goal_board
+from models.Grid_world import Grid_world
 
 
 def run(H_range=[5,15],
         W_range=[5,15],
-        gamma=.9, win_reward=1):
+        gamma=.9, win_reward=1,
+        step_size=1,
+        mode="policy_iteration"):
     
     hh = np.arange(H_range[0], H_range[1]+1)
     ww = np.arange(W_range[0], W_range[1]+1)
@@ -32,15 +34,20 @@ def run(H_range=[5,15],
             
             one_grid_world.mdp.init_policy_and_V(random_init=True)
             
-            V_list =  one_grid_world.solve_mdp(mode="policy_iteration",
-                                               init=False, verbose=True, need_return=True)
+            V_list =  one_grid_world.solve_mdp(mode=mode,
+                                               init=False, verbose=True, need_return=True, step_size=step_size)
             
             step = len(V_list) - 1
             
             step_rec[H_idx, W_idx] = step
             
             Delta_theory = gamma ** (H+W-3) * (1-gamma)
-            upper = np.log(2/(Delta_theory * (1-gamma))) / (1-gamma)
+            if mode == "policy_iteration":
+                upper = np.log(2/(Delta_theory * (1-gamma))) / (1-gamma)
+            elif mode == "projected_Q_descent":
+                upper = 2 / (step_size*Delta_theory) * (1 / (step_size*(1-gamma)) + 1 / (1-gamma)**2) * (1/Delta_theory + step_size) - 1
+            elif mode == "policy_descent":
+                upper = 0
             
             upper_rec[H_idx, W_idx] = upper
             
@@ -49,7 +56,8 @@ def run(H_range=[5,15],
     ax3 = plt.axes(projection='3d')
     
     ax3.plot_surface(HH,WW,step_rec,cmap='rainbow') 
-    ax3.plot_surface(HH,WW,upper_rec,cmap='rainbow')
+    # if mode == "policy_iteration":
+    #     ax3.plot_surface(HH,WW,upper_rec,cmap='rainbow')
     
     plt.show()
             
@@ -80,10 +88,61 @@ def vis_process(grid_world: Grid_world):
 
 
 
+def fix_delta(L=40,
+              gamma=.9, win_reward=1,
+              step_size=1,
+              mode="policy_iteration"):
+    
+    S_size_list = []
+    step_list = []
+    
+    for H in tqdm(range(2, L-1)):
+        
+        W = L - H
+        S_size = H * W
+        
+        board = generate_one_goal_board(H, W)
+        
+        one_grid_world = Grid_world(board,
+                                    gamma,
+                                    win_reward,
+                                    punish_reward=-10)
+        
+        one_grid_world.mdp.init_policy_and_V(random_init=True)
+        
+        V_list =  one_grid_world.solve_mdp(mode=mode,
+                                            init=False, verbose=True, need_return=True, step_size=step_size)
+        
+        print("Delta: %f" % one_grid_world.mdp.compute_delta())
+        
+        step = len(V_list) - 1  
+        
+        print(step)      
+    
+        S_size_list.append(S_size)
+        step_list.append(step)
+        
+    _temp = list(zip(S_size_list, step_list))
+    _temp = sorted(_temp, key=lambda x: x[0])
+    
+    S_size_list = [_[0] for _ in _temp]
+    step_list = [_[1] for _ in _temp]
+    
+    plt.plot(S_size_list, step_list)
+    plt.show()
+
 
 if __name__ == '__main__':
     
-    run()
+    # run(mode="projected_Q_descent",
+    #     step_size=100)
+    
+    # run(mode="policy_descent",
+    #     step_size=100000)    
+    
+    fix_delta(L=50,
+              step_size=10,
+              mode="policy_iteration")
     
     # random.seed(21)
     # H = 3; W = 25
