@@ -5,6 +5,7 @@ from pylab import xticks, yticks
 
 from core.MDP import MDP
 from utils.random_board import generate_random_board, generate_one_goal_board
+from utils.utils import phi_exp_inv_factory, phi_exp_factory, phi_exp_combined_factory
 
 class Grid_world():
     
@@ -129,7 +130,10 @@ class Grid_world():
                   asynchronous=False,
                   init=False,
                   verbose=False,
-                  need_return=False):
+                  need_return=False,
+                  noise=None,
+                  seed=21,
+                  step_size_increasing=False):
         '''
         求解Grid world问题。
         参数：
@@ -151,7 +155,12 @@ class Grid_world():
                 是否返回V_list？
         '''
         
-        assert mode in ["value_iteration", "policy_iteration", "projected_Q_descent", "policy_descent"]
+        assert mode["alg"] in ["value_iteration", "policy_iteration",
+                               "projected_Q_descent", "policy_descent",
+                               "softmax", "softmax_adaptive", "softmax_temp", "softmax_NPG",
+                               "phi", "escort", "escort_normalized"]
+        
+        alg = mode["alg"]
         
         if init:
             self.mdp.init_policy_and_V(random_init=True)
@@ -159,24 +168,114 @@ class Grid_world():
         if not verbose:
             print("Solving!")
         
-        if mode == "value_iteration":
-            V_list = self.mdp.value_iteration(epsilon=epsilon, max_iter=max_iter, asynchronous=asynchronous,
-                                              need_return=need_return, silence=verbose)
-        elif mode == "policy_iteration":
-            V_list = self.mdp.policy_iteration(max_iter=max_iter,
-                                              need_return=need_return, silence=verbose)
-        elif mode == "projected_Q_descent":
-            V_list = self.mdp.projected_Q_descent(max_iter=max_iter, step_size=step_size,
-                                                  need_return=need_return, silence=verbose)
-        elif mode == "policy_descent":
-            V_list = self.mdp.projected_Q_descent(max_iter=max_iter, step_size=step_size,
-                                                  need_return=need_return, silence=verbose, mode="policy_descent")
+        if alg == "value_iteration":
+            return_dict = self.mdp.value_iteration(epsilon=epsilon, max_iter=max_iter, asynchronous=asynchronous,
+                                              need_return=need_return, silence=verbose, seed=seed)
+        elif alg == "policy_iteration":
+            return_dict = self.mdp.policy_iteration(max_iter=max_iter,
+                                              need_return=need_return, silence=verbose, seed=seed)
+        elif alg == "projected_Q_descent":
+            return_dict = self.mdp.projected_Q_descent(max_iter=max_iter, step_size=step_size,
+                                                  need_return=need_return, silence=verbose, noise=noise, seed=seed, step_size_increasing=step_size_increasing)
+        elif alg == "policy_descent":
+            return_dict = self.mdp.projected_Q_descent(max_iter=max_iter, step_size=step_size,
+                                                  need_return=need_return, silence=verbose, mode="policy_descent", noise=noise, seed=seed, step_size_increasing=step_size_increasing)
+        elif alg == "softmax":
+            return_dict = self.mdp.softmax_descent(max_iter=max_iter, step_size=step_size,
+                                              need_return=need_return, silence=verbose, noise=noise, seed=seed)
+        elif alg == "softmax_adaptive":
+            return_dict = self.mdp.softmax_descent(max_iter=max_iter, step_size=step_size,
+                                              need_return=need_return, silence=verbose, mode="adaptive", noise=noise, seed=seed)     
+        elif alg == "softmax_temp":
+            return_dict = self.mdp.softmax_descent(max_iter=max_iter, step_size=step_size,
+                                              need_return=need_return, silence=verbose, mode="temp", noise=noise, seed=seed)    
+        elif alg == "softmax_NPG":
+            return_dict = self.mdp.softmax_descent(max_iter=max_iter, step_size=step_size,
+                                              need_return=need_return, silence=verbose, mode="NPG", noise=noise, seed=seed)  
+        elif alg == "escort_normalized":
+            p = mode["p"]
+            return_dict = self.mdp.escort_descent(max_iter=max_iter, step_size=step_size,
+                                                  need_return=need_return, silence=verbose, mode="normalized", p=p, noise=noise, seed=seed)
+        elif alg == "escort":
+            p = mode["p"]
+            return_dict = self.mdp.escort_descent(max_iter=max_iter, step_size=step_size,
+                                                  need_return=need_return, silence=verbose, mode="origin", p=p, noise=noise, seed=seed)                   
+        elif alg == "phi": 
+            phi = mode["phi"]
+            return_dict = self.mdp.phi_policy_update(phi, max_iter=max_iter, step_size=step_size,
+                                                     need_return=need_return, silence=verbose, noise=noise, seed=seed)
+        if need_return:
+            return return_dict      
         
         if not verbose:
             self.visualize_policy()
             
-        if need_return:
-            return V_list
+            
+    def TD_PMD(self,
+                seed=21,
+                init_state=0,
+                init_action=0,
+                samples_N=10000,
+                actor_step_size_func=lambda k: 0.1,
+                critic_step_size_func=lambda k: 0.1,
+                eps_func=lambda k: 0.1,
+                batch_size=1,
+                mirror_map="npg",
+                use_eps=True,
+                adaptive_critic_step_size=False,
+                adaptive_actor_step_size=False,
+                off_policy=False,
+                vartheta=1,
+                is_expected=False,
+                is_approximated=False):
+    
+        return_dict = self.mdp.single_loop_actor_to_critic_PMD(
+            seed=seed,
+            init_state=init_state,
+            init_action=init_action,
+            samples_N=samples_N,
+            actor_step_size_func=actor_step_size_func,
+            critic_step_size_func=critic_step_size_func,
+            batch_size=batch_size,
+            mirror_map=mirror_map,
+            eps_func=eps_func,
+            use_eps=use_eps,
+            adaptive_critic_step_size=adaptive_critic_step_size,
+            adaptive_actor_step_size=adaptive_actor_step_size,
+            off_policy=off_policy,
+            vartheta=vartheta,
+            is_expected=is_expected,
+            is_approximated=is_approximated
+        )
+        
+        return return_dict
+            
+    
+    def TD_policy_evaluation(self,
+                             max_iter=1000,
+                             epsilon=None,
+                             max_length=10000,
+                             verbose=False,
+                             fix_steps_size=1.,
+                             seed=21):
+        
+        target_state_idx_list = [self.pos2idx[target_state] for target_state in self.target_state_list]
+        V_gap_list = self.mdp.TD_policy_evaluation(
+            max_iter=max_iter,
+            epsilon=epsilon,
+            max_length=max_length,
+            terminate_state=target_state_idx_list,
+            need_return=True,
+            fix_step_size=fix_steps_size,
+            seed=seed
+        )
+        
+        V_gap_array = np.stack(V_gap_list, axis=0)
+        V_gap_mean_curse = np.mean(V_gap_array, axis=1).tolist()
+        if not verbose:
+            plt.plot(V_gap_mean_curse)
+            plt.show()
+        plt.clf()
         
     
     def solve_mdp_using_MC_Learning(self,
@@ -294,7 +393,7 @@ class Grid_world():
     
                       
     
-    def visualize_policy(self):
+    def visualize_policy(self, path=None):
         '''
         可视化得到的策略。
         '''
@@ -344,7 +443,10 @@ class Grid_world():
         for s_idx, a_idx in policy.items():
             draw_one_arrow(idx2pos[s_idx], idx2action[a_idx])
         
-        plt.show()
+        if path is None:
+            plt.show()
+        else:
+            plt.savefig(path)
         
         
     def plot_V_curve_in_VI(self, plot_num=5, differ_epsilon=1e-2):
@@ -446,7 +548,7 @@ if __name__ == '__main__':
     # one_grid_world.solve_mdp(mode="policy_iteration",
     #                          init=True)
     
-    one_grid_world.solve_mdp(mode="policy_descent",
+    one_grid_world.solve_mdp(mode="softmax",
                              init=True, step_size=10)    
     import pdb; pdb.set_trace()
     # import pdb; pdb.set_trace()

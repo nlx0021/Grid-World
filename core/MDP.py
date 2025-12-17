@@ -2,7 +2,7 @@ import numpy as np
 import random
 from tqdm import tqdm
 
-from utils.utils import compute_visit_prob
+from utils.utils import compute_visit_prob, add_noise
 
 class MDP():
     
@@ -35,6 +35,7 @@ class MDP():
         assert self.A_size > 1 and self.S_size > 1, "动作空间和状态空间不能大小为1"
         
         self.init_policy_and_V()
+        self.evaluate_policy()
         
         
     def value_iteration(self,
@@ -42,7 +43,8 @@ class MDP():
                         max_iter=1000,
                         asynchronous=False,
                         need_return=False,
-                        silence=False):
+                        silence=False,
+                        seed=21):
         '''
         值迭代算法计算最佳效用值，并提取最佳策略。
         参数：
@@ -64,6 +66,7 @@ class MDP():
         gamma = self.gamma
         
         iter = 0
+        return_dict = {}
         V_list = [V.copy()]
         while True:
             iter += 1
@@ -103,13 +106,16 @@ class MDP():
         self.V = V
         self.extract_policy()
         
-        return V_list
+        return_dict["V_list"] = V_list
+        
+        return return_dict
                 
                 
     def policy_iteration(self,
                          max_iter=100,
                          need_return=False,
-                         silence=False):
+                         silence=False,
+                         seed=21):
         '''
         策略迭代算法计算最佳策略。
         参数：
@@ -122,10 +128,12 @@ class MDP():
         '''        
         
         iter = 0
+        return_dict = {}
         V_list = [self.V.copy()]
         while True:
             iter += 1
             V_old = self.V.copy()
+            self.extract_policy()
             self.evaluate_policy()
             V_new = self.V.copy()
             V_list.append(V_new)
@@ -134,20 +142,15 @@ class MDP():
                 if not silence:
                     print("策略迭代收敛，迭代次数为：%d" % iter)
                 break                
-            
-            # policy_old = self.policy.copy()
-            self.extract_policy()
-            
-            # if policy_old == self.policy:
-            #     print("策略迭代收敛，迭代次数为：%d" % iter)
-            #     break
                 
             if iter >= max_iter:
                 if not silence:
                     print("策略迭代未收敛！")
                 break
             
-        return V_list
+        return_dict["V_list"] = V_list
+        
+        return return_dict
     
     
     def projected_Q_descent(self,
@@ -155,7 +158,10 @@ class MDP():
                             step_size=1,
                             need_return=False,
                             silence=False,
-                            mode="projected_Q_descent"):
+                            mode="projected_Q_descent",
+                            noise=None,
+                            seed=21,
+                            step_size_increasing=False):
         '''
         Projected Q-descent算法。
         参数：
@@ -191,7 +197,9 @@ class MDP():
                 
                 
         iter = 0
+        return_dict = {}
         V_list = []
+        policy_list = []
         
         # First we run a baseline.
         self.policy_iteration(max_iter=1000,
@@ -199,7 +207,86 @@ class MDP():
         
         V_star = self.V.copy()
         
-        self.init_policy_and_V(random_init=True)
+        self.init_policy_and_V(random_init=True, seed=seed)
+        
+        while True:
+            iter += 1
+            self.evaluate_policy(use_prob_policy=True)
+            V_new = self.V.copy()
+            V_list.append(V_new)
+            policy_list.append(self.prob_policy.copy())
+            
+            if np.linalg.norm(V_new - V_star, ord=np.inf) < 1e-13:
+                if not silence:
+                    print("Q下降算法收敛，迭代次数为：%d" % iter)
+                break             
+            
+            if mode == "projected_Q_descent":
+                if step_size_increasing:
+                    scheduled_step_size = step_size / (self.gamma ** (iter*2-1))
+                    self.prob_policy = proj_to_simplex(self.prob_policy + scheduled_step_size * add_noise(self.Q, noise))
+                else:
+                    self.prob_policy = proj_to_simplex(self.prob_policy + step_size * add_noise(self.Q, noise))
+            elif mode == "policy_descent":
+                # If we use policy gradient, then we need to compute visit prob.
+                d = compute_visit_prob(self.P,
+                                       self.prob_policy,
+                                       init_dist=np.ones((self.S_size, )) / self.S_size,
+                                       gamma=self.gamma)   
+                if step_size_increasing:
+                    scheduled_step_size = step_size * self.S_size / (self.gamma ** (iter*2-1))
+                    self.prob_policy = proj_to_simplex(self.prob_policy + scheduled_step_size / (1-self.gamma) * d.reshape((-1,1)) * add_noise(self.Q, noise))   
+                else:          
+                    self.prob_policy = proj_to_simplex(self.prob_policy + step_size / (1-self.gamma) * d.reshape((-1,1)) * add_noise(self.Q, noise))             
+            
+            if iter >= max_iter:
+                if not silence:
+                    print("策略迭代未收敛！")
+                break
+            
+        return_dict["V_list"] = V_list
+        return_dict["policy_list"] = policy_list
+        
+        return return_dict
+    
+    
+    def softmax_descent(self,
+                        max_iter=5000,
+                        step_size=1,
+                        need_return=False,
+                        silence=False,
+                        mode="softmax",
+                        temp=.1,
+                        noise=None,
+                        seed=21):
+        '''
+        Softmax 梯度下降算法
+        参数：
+            max_iter:
+                迭代次数的上限。
+            step_size:
+                步长值。
+            need_return:
+                是否需要返回V_list？
+            silence:
+                是否不输出任何信息？
+        '''     
+                
+        iter = 0
+        return_dict = {}
+        V_list = []
+        policy_list = []
+        grad_list = []
+        A_list = []
+        
+        # First we run a baseline.
+        self.policy_iteration(max_iter=1000,
+                              silence=True)
+        
+        V_star = self.V.copy()
+        solution_policy = self.policy
+        self.init_policy_and_V(random_init=True, seed=seed)
+        self.extract_softmax_prob_policy_from_param()
         
         while True:
             iter += 1
@@ -209,25 +296,221 @@ class MDP():
             
             if np.linalg.norm(V_new - V_star, ord=np.inf) < 1e-13:
                 if not silence:
-                    print("Q下降算法收敛，迭代次数为：%d" % iter)
+                    print("Softmax下降算法收敛，迭代次数为：%d" % iter)
                 break             
+
+            d = compute_visit_prob(self.P,
+                                   self.prob_policy,
+                                   init_dist=np.ones((self.S_size, )) / self.S_size,
+                                   gamma=self.gamma)   
+            if mode == "softmax":
+                A = (self.Q - self.V.reshape((-1,1)))
+                grad = 1 / (1-self.gamma) * d.reshape((-1,1)) * self.prob_policy * add_noise(A, noise)
+                self.softmax_param = self.softmax_param + grad * step_size
+            elif mode == "adaptive":
+                A = (self.Q - self.V.reshape((-1,1)))
+                grad = 1 / (1-self.gamma) * d.reshape((-1,1)) * add_noise(A, noise)
+                self.softmax_param = self.softmax_param + grad * step_size
+            elif mode == "NPG":
+                A = (self.Q - self.V.reshape((-1,1)))
+                grad = add_noise(A, noise)
+                self.softmax_param = self.softmax_param + grad * step_size
+            elif mode == "temp":
+                A = (self.Q - self.V.reshape((-1,1)))
+                grad = 1 / (1-self.gamma) * d.reshape((-1,1)) * self.prob_policy ** temp * add_noise(A, noise)
+                self.softmax_param = self.softmax_param + grad * step_size                
             
-            if mode == "projected_Q_descent":
-                self.prob_policy = proj_to_simplex(self.prob_policy + step_size * self.Q)
-            elif mode == "policy_descent":
-                # If we use policy gradient, then we need to compute visit prob.
-                d = compute_visit_prob(self.P,
-                                       self.prob_policy,
-                                       init_dist=np.ones((self.S_size, )) / self.S_size,
-                                       gamma=self.gamma)   
-                self.prob_policy = proj_to_simplex(self.prob_policy + step_size / (1-self.gamma) * d.reshape((-1,1)) * self.Q)             
+            grad_list.append(grad.copy())
+            policy_list.append(self.prob_policy.copy())
+            A_list.append(A)            
+            #FIXME: Be careful: we change the orignial update algorithm.
+            ############################################################
+            # self.softmax_param = self.softmax_param - np.max(self.softmax_param, axis=1, keepdims=True)
+            ############################################################
+            self.extract_softmax_prob_policy_from_param()
             
             if iter >= max_iter:
                 if not silence:
                     print("策略迭代未收敛！")
                 break
             
-        return V_list            
+        return_dict["V_list"] = V_list
+        return_dict["A_list"] = A_list
+        return_dict["policy_list"] = policy_list
+        return_dict["grad_list"] = grad_list
+        return_dict["solution_policy"] = solution_policy
+        
+        return return_dict
+        
+
+    def escort_descent(self,
+                       max_iter=5000,
+                       step_size=1,
+                       need_return=False,
+                       silence=False,
+                       mode="normalized",
+                       p=2,
+                       noise=None,
+                       seed=21):
+        '''
+        Escort 梯度下降算法
+        参数：
+            max_iter:
+                迭代次数的上限。
+            step_size:
+                步长值。
+            need_return:
+                是否需要返回V_list？
+            silence:
+                是否不输出任何信息？
+            p:
+                Escort的阶数
+            mode:
+                "normalized": 状态归一化步长 (对应phi update)
+                "origin": 普通固定步长
+        '''     
+                
+        iter = 0
+        return_dict = {}
+        V_list = []
+        policy_list = []
+        grad_list = []
+        A_list = []
+        
+        # First we run a baseline.
+        self.policy_iteration(max_iter=1000,
+                              silence=True)
+        
+        V_star = self.V.copy()
+        solution_policy = self.policy
+        self.init_policy_and_V(random_init=True, seed=seed)
+        self.extract_escort_prob_policy_from_param(p)
+        
+        while True:
+            iter += 1
+            self.evaluate_policy(use_prob_policy=True)
+            V_new = self.V.copy()
+            V_list.append(V_new)
+            
+            if np.linalg.norm(V_new - V_star, ord=np.inf) < 1e-13:
+                if not silence:
+                    print("Escort下降算法收敛，迭代次数为：%d" % iter)
+                break             
+
+            d = compute_visit_prob(self.P,
+                                   self.prob_policy,
+                                   init_dist=np.ones((self.S_size, )) / self.S_size,
+                                   gamma=self.gamma)   
+            if mode == "normalized":
+                A = (self.Q - self.V.reshape((-1,1)))
+                grad = 1 / (1-self.gamma) * d.reshape((-1,1)) * self.prob_policy * add_noise(A, noise) * p / self.escort_param
+                normalized_step_size = step_size * np.power((np.sum(np.power(np.abs(self.escort_param), p), axis=1, keepdims=True)), 2/p)
+                # import pdb; pdb.set_trace()
+                self.escort_param = self.escort_param + grad * normalized_step_size
+            elif mode == "constant":
+                A = (self.Q - self.V.reshape((-1,1)))
+                grad = 1 / (1-self.gamma) * d.reshape((-1,1)) * self.prob_policy * add_noise(A, noise) * p / (self.escort_param)
+                self.escort_param = self.escort_param + grad * step_size  
+            elif mode == "origin":
+                # Note that it is irrelavant to step size.
+                A = (self.Q - self.V.reshape((-1,1)))
+                grad = 1 / (1-self.gamma) * d.reshape((-1,1)) * self.prob_policy * add_noise(A, noise) * p / (self.escort_param)
+                normalized_step_size = (1-self.gamma) ** 3 * np.power((np.sum(np.power(np.abs(self.escort_param), p), axis=1, keepdims=True)), 2/p) / (10 * p ** 2 * self.A_size ** (2/p))
+                self.escort_param = self.escort_param + grad * normalized_step_size
+            
+            grad_list.append(grad.copy())
+            policy_list.append(self.prob_policy.copy())
+            A_list.append(A)            
+            self.extract_escort_prob_policy_from_param(p)
+            
+            if iter >= max_iter:
+                if not silence:
+                    print("策略迭代未收敛！")
+                break
+            
+        return_dict["V_list"] = V_list
+        return_dict["A_list"] = A_list
+        return_dict["policy_list"] = policy_list
+        return_dict["grad_list"] = grad_list
+        return_dict["solution_policy"] = solution_policy
+        
+        return return_dict
+    
+    
+    def phi_policy_update(self,
+                          phi,
+                          max_iter=5000,
+                          step_size=1,
+                          need_return=False,
+                          silence=False,
+                          noise=None,
+                          step_include_d=False,
+                          seed=21):
+            '''
+            phi-update 策略更新算法
+            参数：
+                max_iter:
+                    迭代次数的上限。
+                step_size:
+                    步长值。
+                need_return:
+                    是否需要返回V_list？
+                silence:
+                    是否不输出任何信息？
+            '''     
+                    
+            iter = 0
+            return_dict = {}
+            V_list = []
+            policy_list = []
+            grad_list = []
+            A_list = []
+            
+            # First we run a baseline.
+            self.policy_iteration(max_iter=1000,
+                                  silence=True)
+            
+            V_star = self.V.copy()
+            solution_policy = self.policy
+            self.init_policy_and_V(random_init=True, seed=seed)
+            
+            while True:
+                iter += 1
+                self.evaluate_policy(use_prob_policy=True)
+                V_new = self.V.copy()
+                V_list.append(V_new)
+                
+                if np.linalg.norm(V_new - V_star, ord=np.inf) < 1e-13:
+                    if not silence:
+                        print("Phi-policy算法收敛，迭代次数为：%d" % iter)
+                    break             
+
+                d = compute_visit_prob(self.P,
+                                    self.prob_policy,
+                                    init_dist=np.ones((self.S_size, )) / self.S_size,
+                                    gamma=self.gamma)   
+                A = (self.Q - self.V.reshape((-1,1)))
+                if step_include_d:
+                    s_step_size = step_size * d.reshape((-1,1)) / (1-self.gamma)
+                else:
+                    s_step_size = step_size
+                self.prob_policy = self.prob_policy * phi(s_step_size * add_noise(A, noise))
+                self.prob_policy = self.prob_policy / np.sum(self.prob_policy, axis=1, keepdims=True)          
+                
+                policy_list.append(self.prob_policy.copy())
+                A_list.append(A)            
+                
+                if iter >= max_iter:
+                    if not silence:
+                        print("策略迭代未收敛！")
+                    break
+                
+            return_dict["V_list"] = V_list
+            return_dict["A_list"] = A_list
+            return_dict["policy_list"] = policy_list
+            return_dict["solution_policy"] = solution_policy
+            
+            return return_dict
         
     
     def evaluate_policy(self, epsilon=None,
@@ -309,16 +592,49 @@ class MDP():
         
         # policy_vec = np.diag(np.argmax(np.einsum('ijk,ikl->ijl', P, np.transpose(rewards, [0,2,1]) + gamma*V.reshape((-1,1))), axis=0))     
         # for s in range(self.S_size): policy[s] = policy_vec[s]               #FIXME: 默认选择第一个最大动作
+        
+    
+    def extract_softmax_prob_policy_from_param(self):
+        '''
+        从self.softmax_param里面提取出prob_policy.
+        '''
+        
+        self.prob_policy = np.exp(self.softmax_param - np.max(self.softmax_param))
+        self.prob_policy = self.prob_policy / np.sum(self.prob_policy, axis=1, keepdims=True)
+        self.prob_policy = self.prob_policy.astype(np.float64)
+        if True in np.isnan(self.prob_policy):
+            import pdb; pdb.set_trace()
+            
+    
+    def extract_escort_prob_policy_from_param(self, p):
+        '''
+        从self.escort_param里面提取出prob_policy.
+        '''
+        
+        self.prob_policy = np.power(np.abs(self.escort_param), p)
+        self.prob_policy = self.prob_policy / np.sum(self.prob_policy, axis=1, keepdims=True)
+        if True in np.isnan(self.prob_policy):
+            import pdb; pdb.set_trace()
             
 
-    def init_policy_and_V(self, random_init=False, seed=None):
+    def init_policy_and_V(self, random_init=False, seed=None, policy_init=False):
         
         if seed is not None: self.set_seed(seed)
         
         self.V = np.zeros((self.S_size, ), dtype=np.float32)      # Initialize V-values.
         self.Q = np.zeros((self.S_size, self.A_size), dtype=np.float32)
-        self.policy = {state: 0 for state in range(self.S_size)}  # Initialize policy.
-        self.prob_policy = np.zeros((self.S_size, self.A_size), dtype=np.float32)
+        if policy_init:
+            self.policy = {state: random.randint(0, self.A_size-1) for state in range(self.S_size)}
+            self.prob_policy = np.random.uniform(size=(self.S_size, self.A_size))
+            self.prob_policy = self.prob_policy / np.sum(self.prob_policy, axis=1, keepdims=True)
+            self.softmax_param = np.longdouble(np.random.uniform(size=(self.S_size, self.A_size))* .1)
+            self.escort_param = np.longdouble(np.random.uniform(size=(self.S_size, self.A_size))* .1)
+        else:
+            self.policy = {state: 0 for state in range(self.S_size)}  # Initialize policy.
+            self.prob_policy = np.ones((self.S_size, self.A_size), dtype=np.float32)
+            self.prob_policy = self.prob_policy / np.sum(self.prob_policy, axis=1, keepdims=True)
+            self.softmax_param = np.longdouble(np.zeros((self.S_size, self.A_size)))
+            self.escort_param = np.longdouble(np.zeros((self.S_size, self.A_size)))
         
         if random_init:
             self.V = np.random.uniform(size=(self.S_size, ))
@@ -326,6 +642,8 @@ class MDP():
             self.policy = {state: random.randint(0, self.A_size-1) for state in range(self.S_size)}
             self.prob_policy = np.random.uniform(size=(self.S_size, self.A_size))
             self.prob_policy = self.prob_policy / np.sum(self.prob_policy, axis=1, keepdims=True)
+            self.softmax_param = np.longdouble(np.random.uniform(size=(self.S_size, self.A_size))* .1)
+            self.escort_param = np.longdouble(np.random.uniform(size=(self.S_size, self.A_size))* .1)
             
     
     def init_policy_with_Q_table(self, Q_table):
@@ -358,10 +676,216 @@ class MDP():
     
     def random_choose_action(self, weight=None):
         
-        if not weight:
+        if weight is None:
             return random.randint(0, self.A_size-1)
         return random.choices(list(range(self.A_size)), weights=weight, k=1)[0]
+    
+    
+    def sample_trajectory(self, init_state, init_action, max_length=1000, eps=0.1, use_eps=True, prob_policy=None):
+        '''
+        用某个策略来从某个状态开始采样。
+        参数：
+            init_state: 采样开始的初始状态 -> int.
+            max_length: 采样得到的链条的最大长度
+            
+        (s_t, a_t) -> (r_t, s_{t+1}, a_{t+1}).
+        '''
         
+        if prob_policy is None: prob_policy = self.prob_policy
+        
+        s_list = []
+        a_list = []
+        r_list = []
+        
+        def sample_one_step(state, action):
+            '''
+            Given a (s, a), get the next state s' and r(s, a, s').
+            '''
+            # Get the prob.
+            trans_prob = self.P[action, state].tolist()
+            # Sample next state.
+            next_state = self.random_choose_state(weight=trans_prob)
+            # Now we can get the reward of last move.
+            last_reward = self.rewards[action, state, next_state]
+            
+            return (last_reward, next_state)
+        
+        def sample_one_action(state):
+            '''
+            Given a state s, use epsilon-greedy policy to get the action and its prob.
+            '''
+            # Get the prob policy.
+            prob_policy_s = prob_policy[state]
+            
+            if use_eps:
+                prob_policy_s = (1-eps) * prob_policy_s + eps / self.A_size
+            else:
+                prob_policy_s = prob_policy_s
+            action = self.random_choose_action(weight=prob_policy_s)
+            return action
+        
+        # Start sampling!
+        state = init_state
+        action = init_action
+        length = 0
+        while length < max_length:
+            (reward, next_state) = sample_one_step(state, action)
+            next_action = sample_one_action(next_state)
+            s_list.append(next_state)
+            a_list.append(next_action)
+            r_list.append(reward)
+            state = next_state
+            action = next_action
+            length += 1
+            
+        return s_list, a_list, r_list, length
+    
+    
+    def sample_alternating_trajectory():
+        pass
+    
+    def single_loop_actor_to_critic_PMD(self,
+                                        seed=21,
+                                        init_state=0,
+                                        init_action=0,
+                                        actor_step_size_func=lambda k: 0.1,
+                                        critic_step_size_func=lambda k: 0.1,
+                                        eps_func=lambda k: 0.1,
+                                        batch_size=1,
+                                        mirror_map="npg",
+                                        samples_N=1000,
+                                        use_eps=True,
+                                        adaptive_critic_step_size=False,
+                                        adaptive_actor_step_size=False,
+                                        off_policy=False,
+                                        vartheta=1,
+                                        is_expected=False,
+                                        is_approximated=False):
+        
+        def proj_to_simplex(prob_policy):
+            
+            for s in range(self.S_size):
+                _policy_s = prob_policy[s]
+                _policy_s_sorted = np.sort(_policy_s)
+                
+                for i in range(self.A_size-1, 0, -1):
+                    t_i = (np.sum(_policy_s_sorted[i:]) - 1) / (self.A_size - i)
+                    if t_i >= _policy_s_sorted[i-1]:
+                        t = t_i
+                        break
+                
+                else:
+                    t = (np.sum(_policy_s_sorted) - 1) / self.A_size
+                
+                prob_policy[s] = np.clip(_policy_s - t, a_min=0, a_max=1)
+                prob_policy[s] = prob_policy[s] / np.sum(prob_policy[s])
+
+            return prob_policy       
+
+        np.random.seed(seed)
+        
+        assert samples_N % batch_size == 0 and samples_N > 0 and batch_size > 0 and samples_N > batch_size
+        assert mirror_map in ["npg", "pqa"]
+        assert not (is_expected and is_approximated)
+        
+        iters = samples_N // batch_size
+        V_list = []
+        err_list = []
+        policy_list = []
+        policy_TV_list = []
+        
+        # First we run a baseline.
+        self.policy_iteration(max_iter=1000,
+                                silence=True)
+        
+        V_star = self.V.copy()
+        solution_policy = self.policy.copy()
+        self.init_policy_and_V(random_init=False, policy_init=True, seed=seed)
+        
+        # Initialize.
+        state = init_state
+        action = init_action
+        Q_table = self.Q.copy()
+        if off_policy:
+            behavior_policy = self.prob_policy.copy()
+            
+        for iter in tqdm(range(iters)):
+            # Actor step.
+            actor_step_size = actor_step_size_func(iter)
+            critic_step_size = critic_step_size_func(iter)
+            eps = eps_func(iter)
+            # Sample batch tuples.
+            if off_policy:
+                if is_expected:
+                    s_batch, a_batch, r_batch, length = self.sample_trajectory(state, action, max_length=batch_size, eps=eps, use_eps=False, prob_policy=behavior_policy)
+                if is_approximated:
+                    pass # TODO
+            else:
+                s_batch, a_batch, r_batch, length = self.sample_trajectory(state, action, max_length=batch_size, eps=eps, use_eps=use_eps, prob_policy=None)
+            
+            # Actor step.
+            if mirror_map == "npg":
+                self.prob_policy = self.prob_policy * np.exp(actor_step_size * Q_table)
+                self.prob_policy = self.prob_policy / np.sum(self.prob_policy, axis=1, keepdims=True)
+            if mirror_map == "pqa":
+                self.prob_policy = proj_to_simplex(self.prob_policy + actor_step_size * Q_table)
+            
+            TD_error = np.zeros_like(Q_table)
+            weighted_TD_error = TD_error.copy()
+            weight_sum = 0
+            # Critic step.
+            if off_policy:
+                if is_expected:
+                    for t in range(length):
+                        next_state, next_action, r_t = s_batch[t], a_batch[t], r_batch[t]
+                        # target = r_t + self.gamma * Q_table[next_state, next_action]
+                        target = r_t + self.gamma * np.dot(self.prob_policy[next_state, :], Q_table[next_state, :])
+                        TD_error[state, action] = TD_error[state, action] + (target - Q_table[state, action])
+                        weighted_TD_error[state, action] = TD_error[state, action] * (vartheta ** (length-1-t))
+                        weight_sum += (vartheta ** (length-1-t))
+                        state, action = next_state, next_action
+                    weighted_TD_error = weighted_TD_error / weight_sum
+                if is_approximated:
+                    pass # TODO
+            else:
+                for t in range(length):
+                    next_state, next_action, r_t = s_batch[t], a_batch[t], r_batch[t]
+                    target = r_t + self.gamma * Q_table[next_state, next_action]
+                    TD_error[state, action] = TD_error[state, action] + (target - Q_table[state, action])
+                    weighted_TD_error[state, action] = TD_error[state, action] * (vartheta ** (length-1-t))
+                    weight_sum += (vartheta ** (length-1-t))
+                    state, action = next_state, next_action
+                weighted_TD_error = weighted_TD_error / weight_sum
+                
+            if not adaptive_critic_step_size:
+                Q_table = Q_table + critic_step_size * weighted_TD_error
+            else:
+                Q_table = Q_table + critic_step_size * (weighted_TD_error / ((1-eps) * (self.prob_policy) + eps * 1/self.A_size))
+                Q_table = np.clip(Q_table, a_min=-1/(1-self.gamma), a_max=1/(1-self.gamma))
+            
+            # Evaluate the policy.
+            self.evaluate_policy(use_prob_policy=True)
+            V_new = self.V.copy()
+            V_list.extend([V_new] * batch_size)
+            err_list.extend([np.linalg.norm(V_new - V_star, ord=np.inf)] * batch_size)
+            policy_list.extend([self.prob_policy.copy()] * batch_size)
+            
+            # Check convergence.
+            if np.linalg.norm(V_new - V_star, ord=np.inf) < 1e-13:
+                print("TD-PMD converges with samples of%d" % (iter*batch_size))
+                break
+        
+        
+        return_dict = {}
+        return_dict["V_list"] = V_list
+        return_dict["err_list"] = err_list
+        return_dict["solution_policy"] = solution_policy
+        return_dict["policy_list"] = policy_list
+        
+        return return_dict
+        
+    
+    ############################################################# Abandoned ########################################################        
         
     def sample_with_epsilon_greedy_policy(self, state, epsilon=.05, max_length=1000, terminate_state=None,
                                           return_terminate_state=False):
@@ -557,6 +1081,71 @@ class MDP():
         
         if need_return: return V_list
         
+    
+    def TD_policy_evaluation(self, max_iter=1000,
+                             epsilon=None,
+                             max_length=1000,
+                             terminate_state=None,
+                             need_return=False,
+                             magic=False,
+                             is_break=True,
+                             seed=None,
+                             fix_step_size=1,
+                             step_size_scale=True):
+        '''
+        Off-policy MC Learning.
+        参数：
+            max_iter: 总共进行的循环次数 -> int.
+            epsilon: 若为None将用1/sqrt(k) -> float.
+            max_length: 每条轨迹的最长长度 -> int.
+            terminate_state: 终止状态集合 -> list.
+            need_return: 是否需要输出V_list -> bool.
+            magic: W放在外面还是里面？ -> bool.
+            is_break: 用break还是用continue？ -> bool.
+            seed: 设置随机数种子 -> any
+            fix_step_size: 使用常数步长 -> float.
+        '''
+        if seed is not None: self.set_seed(seed)
+        
+        self.init_policy_and_V(random_init=True, seed=seed)
+        
+        self.evaluate_policy(use_prob_policy=True)
+        V_pi = self.V
+        # import pdb; pdb.set_trace()
+        V_table = np.zeros((self.S_size, ))
+        N_table = np.zeros((self.S_size, ))
+        
+        V_gap_list = []     # To record the qualities.
+        for iter in tqdm(range(max_iter)):
+            # Randomly choose an initial state.
+            init_state = self.random_choose_state()
+            # Sample a trajectory.
+            new_epsilon = epsilon if epsilon is not None else 1 / ((iter+1) ** (1/2))
+            s_list, a_list, r_list, prob_list, length = self.sample_with_epsilon_greedy_policy(init_state,
+                                                                                               epsilon=new_epsilon,
+                                                                                               max_length=max_length,
+                                                                                               terminate_state=terminate_state)
+            
+
+            for t in range(length-2, -1, -1):    # From T-1, T-2, ... 0.
+                # Check whether (s_t, a_t) appears before.
+                # If it didn't appear, we update our policy.
+                s_t, a_t = s_list[t], a_list[t]
+                s_next, a_next = s_list[t+1], a_list[t+1]
+                if step_size_scale:
+                    V_table[s_t] = V_table[s_t] + fix_step_size * (r_list[t] + self.gamma*V_table[s_next] - V_table[s_t]) / np.sqrt(N_table[s_t]+1)
+                else:
+                    V_table[s_t] = V_table[s_t] + fix_step_size * (r_list[t] + self.gamma*V_table[s_next] - V_table[s_t])
+                N_table[s_t] += 1
+                    
+            # After each iteration, we evaluate our policy.
+            # import pdb; pdb.set_trace()
+            if need_return:
+                V_gap_list.append(np.abs(V_pi - V_table))
+        
+        if need_return: return V_gap_list        
+        
+        
         
     def SARSA(self,
               max_iter=10000,
@@ -677,6 +1266,8 @@ class MDP():
                 
         if need_return: return V_list        
                                   
+    
+    ##############################################################################################################################
     
     def compute_delta(self):
         '''
