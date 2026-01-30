@@ -57,7 +57,7 @@ def run(model: RandomMDP,
             log_diff_list = np.array([np.log(np.dot(V_star - V, metric_rho) + EPSILON) for V in V_list])
         
         log_diff_dict[str([mode, step_size])] = (log_diff_list)
-        max_iter = min(max_iter, len(log_diff_list))
+        # max_iter = max(max_iter, len(log_diff_list))
         
     if exp_mode == "multi-run":
     # Plot the curve.
@@ -66,7 +66,7 @@ def run(model: RandomMDP,
         for (mode, step_size) in param_list:   
             diff_lists = log_diff_dict[str([mode, step_size])]
             label = mode.get("label", mode["alg"])
-            ax.plot(np.arange(max_iter), diff_lists[:max_iter], '-', label=str(label))
+            ax.plot(np.arange(len(diff_lists)), diff_lists, '-', label=str(label))
 
         ax.set_xlabel("iters")
         ax.set_ylabel("log value error")
@@ -74,6 +74,7 @@ def run(model: RandomMDP,
         ax.grid(True)
         ax.grid(alpha=0.3)
         plt.show()
+        # plt.savefig("./outputs/Convergence Curve.png")   # Hard Coding FIXME
     
     elif exp_mode == "local-rate":
         assert mode.get("phi", None) is not None, "Please provide the phi function."
@@ -132,36 +133,38 @@ if __name__ == '__main__':
     
     seed = np.random.randint(65536)
     seed = 42
-    model = RandomMDP(S_size=S_size,
-                      A_size=A_size,
-                      gamma=gamma,
-                      seed=seed)   
-    
-    # H, W = 10, 10
+    # model = RandomMDP(S_size=S_size,
+    #                   A_size=A_size,
+    #                   gamma=gamma,
+    #                   seed=seed)   
+    np.random.seed(seed)
+    H, W = 10, 10
     # board = generate_one_goal_board(H, W, random=False)
+    board = generate_random_board(H, W, p_1=.2, p_2=.1)
         
-    # model = Grid_world(board,
-    #                    gamma,
-    #                    win_reward=1,
-    #                    punish_reward=0)  
+    model = Grid_world(board,
+                       gamma,
+                       win_reward=1,
+                       punish_reward=-1)  
     
-    # run(
-    #     model=model,
-    #     max_iter=20000,
-    #     param_list=[
-    #         # [{"alg": "escort", "p": 4}, 1],
-    #         # [{"alg": "phi", "label": "Poly(2)", "phi": phi_poly_factory(2)}, 0.01],
-    #         # [{"alg": "phi", "label": "Poly(4)", "phi": phi_poly_factory(4), "step_include_d": True}, 0.01],
-    #         # [{"alg": "phi", "label": "Poly(8)", "phi": phi_poly_factory(8), "step_include_d": True}, 0.01],
-    #         [{"alg": "phi", "label": "Exp(1,1)", "phi": phi_exp_inv_factory(1, 1)}, 1],
-    #         # [{"alg": "policy_descent"}, 10],
-    #         # [{"alg": "softmax_adaptive", "label": "reshaped SPG"}, 1],
-    #         # [{"alg": "softmax", "label": "SPG"}, 1]
-    #     ],
-    #     metric="rho",
-    #     exp_mode="policy-converge",
-    #     noise=None,
-    #     seed=seed
-    # )
+    run(
+        model=model,
+        max_iter=10000,
+        param_list=[
+            # [{"alg": "escort", "p": 4}, 1],
+            # [{"alg": "phi", "label": "Poly(2)", "phi": phi_poly_factory(2)}, 0.01],
+            # [{"alg": "phi", "label": "Poly(4)", "phi": phi_poly_factory(4), "step_include_d": True}, 0.01],
+            # [{"alg": "phi", "label": "Poly(8)", "phi": phi_poly_factory(8), "step_include_d": True}, 0.01],
+            [{"alg": "phi", "label": "Softmax NPG", "phi": phi_exp_inv_factory(1, 1)}, 0.1],
+            [{"alg": "policy_descent", "label": "Direct PPG"}, 0.1],
+            # [{"alg": "softmax_adaptive", "label": "reshaped SPG"}, 1],
+            [{"alg": "softmax", "label": "Softmax PG"}, 1],
+            [{"alg": "projected_Q_descent", "label": "PQA"}, 0.1]
+        ],
+        metric="rho",
+        exp_mode="multi-run",
+        noise=None,
+        seed=seed
+    )
     
-    model.TD_policy_evaluation(epsilon=0, max_iter=100000, fix_steps_size=1.2, step_size_scale=True, max_length=2)
+    # model.TD_policy_evaluation(epsilon=0, max_iter=100000, fix_steps_size=1.2, step_size_scale=True, max_length=2)

@@ -9,7 +9,8 @@ class MDP():
     def __init__(self,
                  P,
                  gamma,
-                 rewards):
+                 rewards,
+                 terminate_state=[]):
         '''
         初始化一个MDP模型。
         参数：
@@ -33,6 +34,8 @@ class MDP():
         
         self.A_size, self.S_size, _ = self.P.shape
         assert self.A_size > 1 and self.S_size > 1, "动作空间和状态空间不能大小为1"
+        
+        self.terminate_state = terminate_state
         
         self.init_policy_and_V()
         self.evaluate_policy()
@@ -696,6 +699,7 @@ class MDP():
         s_list = []
         a_list = []
         r_list = []
+        terminate_flag = False
         
         def sample_one_step(state, action):
             '''
@@ -738,12 +742,79 @@ class MDP():
             action = next_action
             length += 1
             
-        return s_list, a_list, r_list, length
+            if state in self.terminate_state:
+                terminate_flag = True
+            
+        return s_list, a_list, r_list, length, terminate_flag
     
     
-    def sample_alternating_trajectory():
-        pass
-    
+    def sample_alternating_trajectory(self, init_state, init_action, max_length=1000, eps=0.1, use_eps=True, behavior_policy=None):
+
+        s_list = []
+        a_list = []
+        next_s_list = []
+        next_a_list = []
+        r_list = []
+        terminate_flag = False
+
+        def sample_one_step(state, action):
+            '''
+            Given a (s, a), get the next state s' and r(s, a, s').
+            '''
+            # Get the prob.
+            trans_prob = self.P[action, state].tolist()
+            # Sample next state.
+            next_state = self.random_choose_state(weight=trans_prob)
+            # Now we can get the reward of last move.
+            last_reward = self.rewards[action, state, next_state]
+
+            return (last_reward, next_state)
+
+        def sample_one_action(state, behavior=False):
+            '''
+            Given a state s, use epsilon-greedy policy to get the action and its prob.
+            '''
+            # Get the prob policy.
+            if behavior:
+                prob_policy = behavior_policy
+                prob_policy_s = prob_policy[state]
+            else:
+                prob_policy = self.prob_policy
+                prob_policy_s = prob_policy[state]
+
+            if use_eps:
+                prob_policy_s = (1-eps) * prob_policy_s + eps / self.A_size
+            else:
+                prob_policy_s = prob_policy_s
+            action = self.random_choose_action(weight=prob_policy_s)
+            return action
+
+        # Start sampling!
+        state = init_state
+        action = init_action
+        length = 0
+        while length < max_length:
+            (_, next_state) = sample_one_step(state, action)
+            next_action = sample_one_action(next_state, behavior=True)
+            s_list.append(next_state)
+            a_list.append(next_action)
+            
+            state = next_state
+            action = next_action
+            (reward, next_state) = sample_one_step(state, action)
+            next_action = sample_one_action(next_state, behavior=False)
+            r_list.append(reward)
+            next_s_list.append(next_state)
+            next_a_list.append(next_action)
+            
+            length += 1
+            
+            if state in self.terminate_state:
+                terminate_flag = True
+
+        return s_list, a_list, r_list, next_s_list, next_a_list, length, terminate_flag
+
+
     def single_loop_actor_to_critic_PMD(self,
                                         seed=21,
                                         init_state=0,
@@ -789,6 +860,9 @@ class MDP():
         assert not (is_expected and is_approximated)
         
         iters = samples_N // batch_size
+        if is_approximated == True:
+            assert samples_N % 2 == 0
+            iters = iters // 2
         V_list = []
         err_list = []
         policy_list = []
@@ -817,11 +891,12 @@ class MDP():
             # Sample batch tuples.
             if off_policy:
                 if is_expected:
-                    s_batch, a_batch, r_batch, length = self.sample_trajectory(state, action, max_length=batch_size, eps=eps, use_eps=False, prob_policy=behavior_policy)
+                    s_batch, a_batch, r_batch, length, terminate_flag = self.sample_trajectory(state, action, max_length=batch_size, eps=eps, use_eps=False, prob_policy=behavior_policy)
                 if is_approximated:
-                    pass # TODO
+                    # pass # TODO
+                    s_batch, a_batch, r_batch, next_s_batch, next_a_batch, length, terminate_flag = self.sample_alternating_trajectory(state, action, max_length=batch_size, eps=eps, use_eps=False, behavior_policy=behavior_policy)
             else:
-                s_batch, a_batch, r_batch, length = self.sample_trajectory(state, action, max_length=batch_size, eps=eps, use_eps=use_eps, prob_policy=None)
+                s_batch, a_batch, r_batch, length, terminate_flag = self.sample_trajectory(state, action, max_length=batch_size, eps=eps, use_eps=use_eps, prob_policy=None)
             
             # Actor step.
             if mirror_map == "npg":
@@ -831,7 +906,6 @@ class MDP():
                 self.prob_policy = proj_to_simplex(self.prob_policy + actor_step_size * Q_table)
             
             TD_error = np.zeros_like(Q_table)
-            weighted_TD_error = TD_error.copy()
             weight_sum = 0
             # Critic step.
             if off_policy:
@@ -840,22 +914,27 @@ class MDP():
                         next_state, next_action, r_t = s_batch[t], a_batch[t], r_batch[t]
                         # target = r_t + self.gamma * Q_table[next_state, next_action]
                         target = r_t + self.gamma * np.dot(self.prob_policy[next_state, :], Q_table[next_state, :])
-                        TD_error[state, action] = TD_error[state, action] + (target - Q_table[state, action])
-                        weighted_TD_error[state, action] = TD_error[state, action] * (vartheta ** (length-1-t))
+                        TD_error[state, action] = TD_error[state, action] + (target - Q_table[state, action]) * (vartheta ** (length-1-t))
                         weight_sum += (vartheta ** (length-1-t))
                         state, action = next_state, next_action
-                    weighted_TD_error = weighted_TD_error / weight_sum
+                    weighted_TD_error = TD_error / weight_sum
                 if is_approximated:
-                    pass # TODO
+                    # pass # TODO
+                    for t in range(length):
+                        state, action, r_t, next_state, next_action = s_batch[t], a_batch[t], r_batch[t], next_s_batch[t], next_a_batch[t]
+                        target = r_t + self.gamma * Q_table[next_state, next_action]
+                        TD_error[state, action] = TD_error[state, action] + (target - Q_table[state, action]) * (vartheta ** (length-1-t))
+                        weight_sum += (vartheta ** (length-1-t))
+                    weighted_TD_error = TD_error / weight_sum
+                    state, action = next_state, next_action
             else:
                 for t in range(length):
                     next_state, next_action, r_t = s_batch[t], a_batch[t], r_batch[t]
                     target = r_t + self.gamma * Q_table[next_state, next_action]
-                    TD_error[state, action] = TD_error[state, action] + (target - Q_table[state, action])
-                    weighted_TD_error[state, action] = TD_error[state, action] * (vartheta ** (length-1-t))
+                    TD_error[state, action] = TD_error[state, action] + (target - Q_table[state, action]) * (vartheta ** (length-1-t))
                     weight_sum += (vartheta ** (length-1-t))
                     state, action = next_state, next_action
-                weighted_TD_error = weighted_TD_error / weight_sum
+                weighted_TD_error = TD_error / weight_sum
                 
             if not adaptive_critic_step_size:
                 Q_table = Q_table + critic_step_size * weighted_TD_error
@@ -874,6 +953,12 @@ class MDP():
             if np.linalg.norm(V_new - V_star, ord=np.inf) < 1e-13:
                 print("TD-PMD converges with samples of%d" % (iter*batch_size))
                 break
+            
+            # If terminate, restart the chain.
+            if terminate_flag:
+                state = init_state
+                action = init_action
+                terminate_flag = False
         
         
         return_dict = {}

@@ -30,7 +30,7 @@ def run_exp(args, model: RandomMDP):
 if __name__ == "__main__":
     
     # Test TD on Random MDP.
-    S_size = 100
+    S_size = 20
     A_size = 10
     gamma = 0.9
     seed = 21
@@ -38,15 +38,15 @@ if __name__ == "__main__":
     model = RandomMDP(S_size=S_size, A_size=A_size, gamma=gamma, seed=seed)
     
     # # Test TD on Grid world MDP.
-    # H = 15
-    # W = 15
+    # H = 10
+    # W = 10
     # gamma = 0.9
     # seed = 21
     # p_1 = 0
     # p_2 = 0.2
     
     # board = generate_random_board(H, W, p_1, p_2)
-    # model = Grid_world(board=board, gamma=gamma)
+    # model = Grid_world(board=board, gamma=gamma, is_termination=False)
     
     # model.mdp.policy_iteration()
     # model.visualize_policy(path=os.path.join("outputs", "Grid_world_policy.png"))
@@ -104,7 +104,7 @@ if __name__ == "__main__":
         "actor_step_size_func": lambda n: 0.001,
         "eps_func": lambda n: 0,
         "batch_size": 10,
-        "mirror_map": "pqa",
+        "mirror_map": "npg",
         "use_eps": False,
         "adaptive_critic_step_size": False,
         "adaptive_actor_step_size": False,
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     # model.print_V()
     # import pdb; pdb.set_trace()
     # Plot the results.
-    plt.plot(return_dict_2['err_list'], label='Expected-TD-AC-PMD')
+    plt.plot(return_dict_2['err_list'], label='Expected-TD-AC-PMD vartheta=0.7')
     
     # Arguements for Expected-TD-AC-PMD with vartheta=0.
     args_3 = args_2
