@@ -1,5 +1,6 @@
 import random
 import numpy as np
+import scipy.sparse as sp
 import matplotlib.pyplot as plt
 from pylab import xticks, yticks
 
@@ -13,7 +14,8 @@ class Grid_world():
                  board,
                  gamma=.9,
                  win_reward=1,
-                 punish_reward=-1):
+                 punish_reward=-1,
+                 is_termination=True):
         '''
         初始化构建一个Grid World游戏。
         参数:
@@ -39,6 +41,7 @@ class Grid_world():
         self.gamma = gamma
         self.win_reward = win_reward
         self.punish_reward = punish_reward
+        self.is_termination = is_termination
         
         # Use (i, j) to present a state first.
         self.state_list = [(i, j) for i in range(self.H) for j in range(self.W)]
@@ -51,7 +54,8 @@ class Grid_world():
         
         # Build the MDP.
         self.P, self.rewards = self.load_board()
-        self.mdp = MDP(self.P, self.gamma, self.rewards)
+        terminate_state = [self.pos2idx[target_state] for target_state in self.target_state_list] if is_termination else []
+        self.mdp = MDP(self.P, self.gamma, self.rewards, terminate_state=terminate_state)
         
         
     def load_board(self):
@@ -103,22 +107,25 @@ class Grid_world():
             for s in self.state_list:
                 next_s = move(s, a)
                 P[action2idx[a], pos2idx[s], pos2idx[next_s]] = 1
-        for target_state in target_state_list:
-            P[:, pos2idx[target_state], :] = 0
-            P[:, pos2idx[target_state], pos2idx[target_state]] = 1               # 无论采取什么动作，最终方格永远循环
+        if self.is_termination:
+            for target_state in target_state_list:
+                P[:, pos2idx[target_state], :] = 0
+                P[:, pos2idx[target_state], pos2idx[target_state]] = 1               # 无论采取什么动作，最终方格永远循环
         
         # 价值函数rewards
         rewards = np.zeros((5, H*W, H*W))
         for target_state in target_state_list:
             # 对所有能够到达胜利格子的设置胜利奖励
             rewards[:, :, pos2idx[target_state]] = self.win_reward * (P[:, :, pos2idx[target_state]] == 1).astype(np.float32)
-            rewards[:, pos2idx[target_state], pos2idx[target_state]] = 0         # 排除自我循环
+            if self.is_termination:
+                rewards[:, pos2idx[target_state], pos2idx[target_state]] = 0         # 排除自我循环
         
         for obstacle_state in obstacle_state_list:
             # 对所有能够到达障碍格子的设置惩罚
             rewards[:, :, pos2idx[obstacle_state]] = self.punish_reward * (P[:, :, pos2idx[obstacle_state]] == 1).astype(np.float32)
-            rewards[:, pos2idx[obstacle_state], pos2idx[obstacle_state]] = 0     # 排除自我循环
-            
+            if self.is_termination:
+                rewards[:, pos2idx[obstacle_state], pos2idx[obstacle_state]] = 0     # 排除自我循环
+        
         return P, rewards
     
     
@@ -441,10 +448,14 @@ class Grid_world():
         idx2pos = self.idx2pos
         idx2action = self.idx2action
         for s_idx, a_idx in policy.items():
+            if self.is_termination:    # 不绘制终点格点上的箭头
+                if self.idx2pos[s_idx] in self.target_state_list:
+                    continue
             draw_one_arrow(idx2pos[s_idx], idx2action[a_idx])
         
         if path is None:
             plt.show()
+            # plt.savefig("./outputs/Grid World.png")   # Hard Coding FIXME
         else:
             plt.savefig(path)
         

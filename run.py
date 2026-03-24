@@ -68,6 +68,7 @@ def run(model: RandomMDP,
     
     if need_kappa:
         print("Kappa dict: ", kappa_dict)
+        # max_iter = max(max_iter, len(log_diff_list))
         
     if exp_mode == "multi-run":
     # Plot the curve.
@@ -86,6 +87,7 @@ def run(model: RandomMDP,
         ax.grid(True)
         ax.grid(alpha=0.3)
         plt.show()
+        # plt.savefig("./outputs/Convergence Curve.png")   # Hard Coding FIXME
     
     elif exp_mode == "local-rate":
         assert mode.get("phi", None) is not None, "Please provide the phi function."
@@ -144,22 +146,23 @@ if __name__ == '__main__':
     
     seed = np.random.randint(65536)
     seed = 42
-    model = RandomMDP(S_size=S_size,
-                      A_size=A_size,
-                      gamma=gamma,
-                      seed=seed)   
-    
-    # H, W = 10, 10
+    # model = RandomMDP(S_size=S_size,
+    #                   A_size=A_size,
+    #                   gamma=gamma,
+    #                   seed=seed)   
+    np.random.seed(seed)
+    H, W = 10, 10
     # board = generate_one_goal_board(H, W, random=False)
+    board = generate_random_board(H, W, p_1=.2, p_2=.1)
         
-    # model = Grid_world(board,
-    #                    gamma,
-    #                    win_reward=1,
-    #                    punish_reward=0)  
+    model = Grid_world(board,
+                       gamma,
+                       win_reward=1,
+                       punish_reward=-1)  
     
     run(
         model=model,
-        max_iter=300,
+        max_iter=10000,
         param_list=[
             # [{"alg": "escort", "p": 4}, 1],
             # [{"alg": "phi", "label": "Poly(2)", "phi": phi_poly_factory(2)}, 0.01],
