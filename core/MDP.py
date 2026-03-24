@@ -278,6 +278,7 @@ class MDP():
         policy_list = []
         grad_list = []
         A_list = []
+        kappa = 1.0
         
         # First we run a baseline.
         self.policy_iteration(max_iter=1000,
@@ -285,6 +286,11 @@ class MDP():
         
         V_star = self.V.copy()
         solution_policy = self.policy
+        # Find out all optimal actions for each state for computing kappa.
+        optimal_actions = {}
+        for s in range(self.S_size):
+            optimal_actions[s] = np.where(self.Q[s] == np.max(self.Q[s]))[0]
+
         self.init_policy_and_V(random_init=True, seed=seed)
         self.extract_softmax_prob_policy_from_param()
         
@@ -329,6 +335,10 @@ class MDP():
             ############################################################
             self.extract_softmax_prob_policy_from_param()
             
+            # Update kappa.
+            for s in range(self.S_size):
+                kappa = min(kappa, self.prob_policy[s, optimal_actions[s]].sum())
+            
             if iter >= max_iter:
                 if not silence:
                     print("策略迭代未收敛！")
@@ -339,6 +349,7 @@ class MDP():
         return_dict["policy_list"] = policy_list
         return_dict["grad_list"] = grad_list
         return_dict["solution_policy"] = solution_policy
+        return_dict["kappa"] = kappa
         
         return return_dict
         

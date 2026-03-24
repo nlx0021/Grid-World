@@ -18,6 +18,7 @@ def run(model: RandomMDP,
         exp_mode="multi-run",
         metric="rho",
         noise=None,
+        need_kappa=False,
         seed=21):
     '''
         param_list:
@@ -34,6 +35,7 @@ def run(model: RandomMDP,
     
     V_star = model.mdp.V.copy()
     delta = model.mdp.compute_delta()
+    kappa_dict = {}
 
     for (mode, step_size) in tqdm(param_list):
         model.mdp.init_policy_and_V(random_init=True, seed=seed)
@@ -56,8 +58,16 @@ def run(model: RandomMDP,
             metric_rho = metric_rho / metric_rho.sum()
             log_diff_list = np.array([np.log(np.dot(V_star - V, metric_rho) + EPSILON) for V in V_list])
         
+        if need_kappa:
+            kappa = return_dict.get("kappa", None)
+            assert kappa is not None, "kappa only supports for Softmax_PG."
+            kappa_dict[str([mode, step_size])] = kappa
+        
         log_diff_dict[str([mode, step_size])] = (log_diff_list)
         max_iter = min(max_iter, len(log_diff_list))
+    
+    if need_kappa:
+        print("Kappa dict: ", kappa_dict)
         
     if exp_mode == "multi-run":
     # Plot the curve.
@@ -67,10 +77,12 @@ def run(model: RandomMDP,
             diff_lists = log_diff_dict[str([mode, step_size])]
             label = mode.get("label", mode["alg"])
             ax.plot(np.arange(max_iter), diff_lists[:max_iter], '-', label=str(label))
-
+        # Clip the y-axis to better show the difference.
+        ax.set_ylim(-12, 3)
         ax.set_xlabel("iters")
         ax.set_ylabel("log value error")
-        ax.legend()
+        # Make Legend larger and clearer.
+        ax.legend(fontsize=12)
         ax.grid(True)
         ax.grid(alpha=0.3)
         plt.show()
@@ -145,23 +157,27 @@ if __name__ == '__main__':
     #                    win_reward=1,
     #                    punish_reward=0)  
     
-    # run(
-    #     model=model,
-    #     max_iter=20000,
-    #     param_list=[
-    #         # [{"alg": "escort", "p": 4}, 1],
-    #         # [{"alg": "phi", "label": "Poly(2)", "phi": phi_poly_factory(2)}, 0.01],
-    #         # [{"alg": "phi", "label": "Poly(4)", "phi": phi_poly_factory(4), "step_include_d": True}, 0.01],
-    #         # [{"alg": "phi", "label": "Poly(8)", "phi": phi_poly_factory(8), "step_include_d": True}, 0.01],
-    #         [{"alg": "phi", "label": "Exp(1,1)", "phi": phi_exp_inv_factory(1, 1)}, 1],
-    #         # [{"alg": "policy_descent"}, 10],
-    #         # [{"alg": "softmax_adaptive", "label": "reshaped SPG"}, 1],
-    #         # [{"alg": "softmax", "label": "SPG"}, 1]
-    #     ],
-    #     metric="rho",
-    #     exp_mode="policy-converge",
-    #     noise=None,
-    #     seed=seed
-    # )
+    run(
+        model=model,
+        max_iter=300,
+        param_list=[
+            # [{"alg": "escort", "p": 4}, 1],
+            # [{"alg": "phi", "label": "Poly(2)", "phi": phi_poly_factory(2)}, 0.01],
+            # [{"alg": "phi", "label": "Poly(4)", "phi": phi_poly_factory(4), "step_include_d": True}, 0.01],
+            # [{"alg": "phi", "label": "Poly(8)", "phi": phi_poly_factory(8), "step_include_d": True}, 0.01],
+            # [{"alg": "phi", "label": "Exp(1,1)", "phi": phi_exp_inv_factory(1, 1)}, 1],
+            # [{"alg": "policy_descent"}, 10],
+            # [{"alg": "softmax_adaptive", "label": "reshaped SPG"}, 1],
+            [{"alg": "softmax", "label": "$\eta=0.01$"}, 0.1],
+            [{"alg": "softmax", "label": "$\eta=1$"}, 1], 
+            [{"alg": "softmax", "label": "$\eta=100$"}, 100], 
+            [{"alg": "softmax", "label": "$\eta=1000$"}, 1000], 
+        ],
+        metric="rho",
+        exp_mode="multi-run",
+        noise=None,
+        seed=21,
+        need_kappa=True
+    )
     
-    model.TD_policy_evaluation(epsilon=0, max_iter=100000, fix_steps_size=1.2, step_size_scale=True, max_length=2)
+    # model.TD_policy_evaluation(epsilon=0, max_iter=100000, fix_steps_size=1.2, step_size_scale=True, max_length=2)
