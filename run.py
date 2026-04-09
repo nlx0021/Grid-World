@@ -72,14 +72,16 @@ def run(model: RandomMDP,
         
     if exp_mode == "multi-run":
     # Plot the curve.
-        fig = plt.figure(figsize=(5,4))
+        fig = plt.figure(figsize=(10,6))
         ax = plt.axes()
         for (mode, step_size) in param_list:   
             diff_lists = log_diff_dict[str([mode, step_size])]
             label = mode.get("label", mode["alg"])
+            if need_kappa:
+                label = label + " (kappa=%.4f)" % kappa_dict[str([mode, step_size])]
             ax.plot(np.arange(max_iter), diff_lists[:max_iter], '-', label=str(label))
         # Clip the y-axis to better show the difference.
-        ax.set_ylim(-12, 3)
+        ax.set_ylim(-14, 3)
         ax.set_xlabel("iters")
         ax.set_ylabel("log value error")
         # Make Legend larger and clearer.
@@ -141,24 +143,24 @@ def run(model: RandomMDP,
 if __name__ == '__main__':
     
     S_size = 20
-    A_size = 5
+    A_size = 10
     gamma = .9
     
     seed = np.random.randint(65536)
-    seed = 42
-    # model = RandomMDP(S_size=S_size,
-    #                   A_size=A_size,
-    #                   gamma=gamma,
-    #                   seed=seed)   
-    np.random.seed(seed)
-    H, W = 10, 10
+    seed = 21
+    model = RandomMDP(S_size=S_size,
+                      A_size=A_size,
+                      gamma=gamma,
+                      seed=seed)   
+    # np.random.seed(seed)
+    # H, W = 10, 10
     # board = generate_one_goal_board(H, W, random=False)
-    board = generate_random_board(H, W, p_1=.2, p_2=.1)
+    # board = generate_random_board(H, W, p_1=.2, p_2=.1)
         
-    model = Grid_world(board,
-                       gamma,
-                       win_reward=1,
-                       punish_reward=-1)  
+    # model = Grid_world(board,
+    #                    gamma,
+    #                    win_reward=1,
+    #                    punish_reward=-1)  
     
     run(
         model=model,

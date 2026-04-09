@@ -8,3 +8,4 @@ mcts_example.py
 output*
 plot_script.py
 PPG-1.pdf
+*.pyc
