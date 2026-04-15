@@ -10,7 +10,8 @@ class MDP():
                  P,
                  gamma,
                  rewards,
-                 terminate_state=[]):
+                 terminate_state=[],
+                 entropy_coeff=None):
         '''
         初始化一个MDP模型。
         参数：
@@ -40,6 +41,8 @@ class MDP():
         self.init_policy_and_V()
         self.evaluate_policy()
         
+        self.entropy_coeff = entropy_coeff
+        
         
     def value_iteration(self,
                         epsilon=1e-5,
@@ -62,6 +65,9 @@ class MDP():
             silence:
                 是否进行输出？
         '''
+        
+        if self.entropy_coeff is None:
+            raise NotImplementedError("目前只支持无熵正则化的值迭代算法！")
         
         V = self.V.copy()
         P = self.P
@@ -136,9 +142,14 @@ class MDP():
         while True:
             iter += 1
             V_old = self.V.copy()
-            self.extract_policy()
-            self.evaluate_policy()
+            if self.entropy_coeff is not None:
+                self.extract_soft_policy()
+                self.evaluate_policy(entropy_coeff=self.entropy_coeff, use_prob_policy=True)
+            else:
+                self.extract_policy()
+                self.evaluate_policy()
             V_new = self.V.copy()
+            print(np.linalg.norm(V_new))
             V_list.append(V_new)
             
             if np.linalg.norm(V_new - V_old, ord=np.inf) < 1e-13:
@@ -536,6 +547,8 @@ class MDP():
         '''
         
         assert not ((epsilon is not None) and use_prob_policy)
+        if self.entropy_coeff is not None:
+            assert use_prob_policy is not None, "熵正则化只支持概率策略！"
         
         P = self.P
         rewards = self.rewards
@@ -565,11 +578,18 @@ class MDP():
             else:
                 P_pi[s, :] = (1-epsilon) * P[policy[s], s, :] + epsilon/self.A_size * np.sum(P[:, s, :], axis=0)
         
-        V_pi = np.linalg.inv(np.eye(self.S_size) - gamma * P_pi) @ r_pi.reshape((-1,1))
-        self.V = V_pi.reshape((-1,))
-        
-        Q_pi = np.stack([np.diag(_) for _ in np.einsum('ijk,ikl->ijl', P, np.transpose(rewards, [0,2,1]) + gamma*self.V.reshape((-1,1)))])
-        self.Q = Q_pi.transpose()
+        if self.entropy_coeff is None:
+            V_pi = np.linalg.inv(np.eye(self.S_size) - gamma * P_pi) @ r_pi.reshape((-1,1))
+            self.V = V_pi.reshape((-1,))
+            
+            Q_pi = np.stack([np.diag(_) for _ in np.einsum('ijk,ikl->ijl', P, np.transpose(rewards, [0,2,1]) + gamma*self.V.reshape((-1,1)))])
+            self.Q = Q_pi.transpose()
+        else:
+            V_pi = np.linalg.inv(np.eye(self.S_size) - gamma * P_pi) @ (r_pi.reshape((-1,1)) + self.entropy_coeff * np.sum(prob_policy * np.log(prob_policy + 1e-23), axis=1, keepdims=True))
+            self.V = V_pi.reshape((-1,))
+            
+            Q_pi = np.stack([np.diag(_) for _ in np.einsum('ijk,ikl->ijl', P, np.transpose(rewards, [0,2,1]) + gamma*self.V.reshape((-1,1)))])
+            self.Q = Q_pi.transpose()
         
         # We need to synchronize the policy and prob_policy.
         if use_prob_policy:
@@ -606,6 +626,15 @@ class MDP():
         
         # policy_vec = np.diag(np.argmax(np.einsum('ijk,ikl->ijl', P, np.transpose(rewards, [0,2,1]) + gamma*V.reshape((-1,1))), axis=0))     
         # for s in range(self.S_size): policy[s] = policy_vec[s]               #FIXME: 默认选择第一个最大动作
+        
+    
+    def extract_soft_policy(self):
+        '''
+        Soft policy iteration.
+        '''
+        self.prob_policy = np.exp(self.Q / self.entropy_coeff - np.max(self.Q / self.entropy_coeff, axis=1, keepdims=True))
+        self.prob_policy = self.prob_policy / np.sum(self.prob_policy, axis=1, keepdims=True)
+        self.prob_policy = self.prob_policy.astype(np.float64)
         
     
     def extract_softmax_prob_policy_from_param(self):

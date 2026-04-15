@@ -13,7 +13,8 @@ class RandomMDP():
                  S_size=70,
                  A_size=10,
                  gamma=.9,
-                 seed=21):
+                 seed=21,
+                 entropy_coeff=None):
         
         '''
         Randomly generate a MDP model.
@@ -32,7 +33,7 @@ class RandomMDP():
         self.rewards = np.random.uniform(size=(A_size, S_size))
         self.rewards = np.expand_dims(self.rewards, axis=2).repeat(S_size, 2)
         
-        self.mdp = MDP(self.P, self.gamma, self.rewards)
+        self.mdp = MDP(self.P, self.gamma, self.rewards, entropy_coeff=entropy_coeff)
         
         
     def solve_mdp(self,

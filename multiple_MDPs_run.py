@@ -18,7 +18,8 @@ def multiple_MDPs_run(model_list: list,
         metric="rho",
         noise=None,
         need_kappa=False,
-        seed=21):
+        seed=21,
+        title="Convergence of MDP Solvers"):
     '''
         param_list:
             [[mode1, step1], [mode2, step2] ... ]
@@ -61,12 +62,12 @@ def multiple_MDPs_run(model_list: list,
     for (model, key) in model_list:
         log_diff_list = log_diff_dict[key][0]
         delta = delta_dict[key]
-        plt.plot(log_diff_list, label=f"{key} (delta={delta:.4f})")
+        plt.plot(log_diff_list, label=f"{key} ($delta$={delta:.4f})")
     plt.xlabel("Iteration")
-    plt.ylabel(f"Log {metric}")
-    # Clip the y-axis to [-21, 0] for better visualization.
-    plt.ylim(-21, 0)
-    plt.title("Convergence of MDP Solvers")
+    plt.ylabel("Log $V^{*}(\rho) - V^k(\rho)$")
+    # Clip the y-axis to [-12, 0] for better visualization.
+    plt.ylim(-12, 0)
+    plt.title(title)
     plt.legend()
     plt.show()
 

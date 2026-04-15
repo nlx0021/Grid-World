@@ -19,6 +19,7 @@ def run(model: RandomMDP,
         metric="rho",
         noise=None,
         need_kappa=False,
+        title="Convergence of MDP Solvers",
         seed=21):
     '''
         param_list:
@@ -36,6 +37,8 @@ def run(model: RandomMDP,
     V_star = model.mdp.V.copy()
     delta = model.mdp.compute_delta()
     kappa_dict = {}
+    
+    import pdb; pdb.set_trace()
 
     for (mode, step_size) in tqdm(param_list):
         model.mdp.init_policy_and_V(random_init=True, seed=seed)
@@ -78,14 +81,20 @@ def run(model: RandomMDP,
             diff_lists = log_diff_dict[str([mode, step_size])]
             label = mode.get("label", mode["alg"])
             if need_kappa:
-                label = label + " (kappa=%.4f)" % kappa_dict[str([mode, step_size])]
+                label = label + " ($\kappa$=%.4f)" % kappa_dict[str([mode, step_size])]
             ax.plot(np.arange(max_iter), diff_lists[:max_iter], '-', label=str(label))
         # Clip the y-axis to better show the difference.
-        ax.set_ylim(-14, 3)
+        ax.set_ylim(-13, 3)
         ax.set_xlabel("iters")
-        ax.set_ylabel("log value error")
+        ax.set_ylabel(r'log $V^*(\rho) - V^k(\rho)$' if metric == "rho" else f"log {metric}")
         # Make Legend larger and clearer.
-        ax.legend(fontsize=12)
+        ax.legend(fontsize=15)
+        # Make xlabel / ylabael larger.
+        ax.xaxis.label.set_size(14)
+        ax.yaxis.label.set_size(14)
+        # Make title's font larger.
+        ax.set_title(title)
+        ax.title.set_size(15)
         ax.grid(True)
         ax.grid(alpha=0.3)
         plt.show()
@@ -146,21 +155,22 @@ if __name__ == '__main__':
     A_size = 10
     gamma = .9
     
-    seed = np.random.randint(65536)
-    seed = 21
-    model = RandomMDP(S_size=S_size,
-                      A_size=A_size,
-                      gamma=gamma,
-                      seed=seed)   
-    # np.random.seed(seed)
-    # H, W = 10, 10
-    # board = generate_one_goal_board(H, W, random=False)
-    # board = generate_random_board(H, W, p_1=.2, p_2=.1)
+    # seed = np.random.randint(65536)
+    # seed = 21
+    # model = RandomMDP(S_size=S_size,
+    #                   A_size=A_size,
+    #                   gamma=gamma,
+    #                   seed=seed)   
+    np.random.seed(21)
+    H, W = 10, 10
+    board = generate_one_goal_board(H, W, random=False)
+    board = generate_random_board(H, W, p_1=.2, p_2=.1)
         
-    # model = Grid_world(board,
-    #                    gamma,
-    #                    win_reward=1,
-    #                    punish_reward=-1)  
+    model = Grid_world(board,
+                       gamma,
+                       win_reward=1,
+                       punish_reward=-1,
+                       entropy_coeff=0.1)  
     
     run(
         model=model,
@@ -175,14 +185,15 @@ if __name__ == '__main__':
             # [{"alg": "softmax_adaptive", "label": "reshaped SPG"}, 1],
             [{"alg": "softmax", "label": "$\eta=0.01$"}, 0.1],
             [{"alg": "softmax", "label": "$\eta=1$"}, 1], 
-            [{"alg": "softmax", "label": "$\eta=100$"}, 100], 
-            [{"alg": "softmax", "label": "$\eta=1000$"}, 1000], 
+            [{"alg": "softmax", "label": "$\eta=100$"}, 100],
+            [{"alg": "softmax", "label": "$\eta=1000$"}, 1000],
         ],
         metric="rho",
         exp_mode="multi-run",
         noise=None,
         seed=21,
-        need_kappa=True
+        need_kappa=True,
+        title="Convergence of Softmax Policy Gradient with Different Step Sizes"
     )
     
     # model.TD_policy_evaluation(epsilon=0, max_iter=100000, fix_steps_size=1.2, step_size_scale=True, max_length=2)

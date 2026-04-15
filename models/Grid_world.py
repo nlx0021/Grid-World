@@ -15,7 +15,8 @@ class Grid_world():
                  gamma=.9,
                  win_reward=1,
                  punish_reward=-1,
-                 is_termination=True):
+                 is_termination=True,
+                 entropy_coeff=None):
         '''
         初始化构建一个Grid World游戏。
         参数:
@@ -42,7 +43,8 @@ class Grid_world():
         self.win_reward = win_reward
         self.punish_reward = punish_reward
         self.is_termination = is_termination
-        
+        self.entropy_coeff = entropy_coeff
+
         # Use (i, j) to present a state first.
         self.state_list = [(i, j) for i in range(self.H) for j in range(self.W)]
         self.pos2idx = {(i, j): i * self.W + j for i in range(self.H) for j in range(self.W)}
@@ -55,7 +57,7 @@ class Grid_world():
         # Build the MDP.
         self.P, self.rewards = self.load_board()
         terminate_state = [self.pos2idx[target_state] for target_state in self.target_state_list] if is_termination else []
-        self.mdp = MDP(self.P, self.gamma, self.rewards, terminate_state=terminate_state)
+        self.mdp = MDP(self.P, self.gamma, self.rewards, terminate_state=terminate_state, entropy_coeff=self.entropy_coeff)
         
         
     def load_board(self):
