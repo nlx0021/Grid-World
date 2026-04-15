@@ -38,7 +38,7 @@ def run(model: RandomMDP,
     delta = model.mdp.compute_delta()
     kappa_dict = {}
     
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
 
     for (mode, step_size) in tqdm(param_list):
         model.mdp.init_policy_and_V(random_init=True, seed=seed)
@@ -154,23 +154,30 @@ if __name__ == '__main__':
     S_size = 20
     A_size = 10
     gamma = .9
+    entropy_coeff = 0.1
     
-    # seed = np.random.randint(65536)
-    # seed = 21
-    # model = RandomMDP(S_size=S_size,
-    #                   A_size=A_size,
-    #                   gamma=gamma,
-    #                   seed=seed)   
-    np.random.seed(21)
-    H, W = 10, 10
-    board = generate_one_goal_board(H, W, random=False)
-    board = generate_random_board(H, W, p_1=.2, p_2=.1)
+    seed = np.random.randint(65536)
+    seed = 21
+    model = RandomMDP(S_size=S_size,
+                      A_size=A_size,
+                      gamma=gamma,
+                      seed=seed,
+                      entropy_coeff=entropy_coeff)   
+    # np.random.seed(21)
+    # H, W = 10, 10
+    # board = generate_one_goal_board(H, W, random=False)
+    # board = generate_random_board(H, W, p_1=.2, p_2=.1)
         
-    model = Grid_world(board,
-                       gamma,
-                       win_reward=1,
-                       punish_reward=-1,
-                       entropy_coeff=0.1)  
+    # model = Grid_world(board,
+    #                    gamma,
+    #                    win_reward=1,
+    #                    punish_reward=-1,
+    #                    entropy_coeff=0.000001)  
+    
+    # Compute the beta.
+    f = lambda x: np.exp(-2*x * (1+entropy_coeff * np.log(A_size)) / (1-gamma)**2) - entropy_coeff * x / (2*(1-gamma))
+    beta = solve_zero_point_by_binary_searching(f)
+    import pdb; pdb.set_trace()
     
     run(
         model=model,

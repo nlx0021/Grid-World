@@ -38,10 +38,11 @@ class MDP():
         
         self.terminate_state = terminate_state
         
+        self.entropy_coeff = entropy_coeff
+        
         self.init_policy_and_V()
         self.evaluate_policy()
         
-        self.entropy_coeff = entropy_coeff
         
         
     def value_iteration(self,
@@ -144,15 +145,14 @@ class MDP():
             V_old = self.V.copy()
             if self.entropy_coeff is not None:
                 self.extract_soft_policy()
-                self.evaluate_policy(entropy_coeff=self.entropy_coeff, use_prob_policy=True)
+                self.evaluate_policy(use_prob_policy=True)
             else:
                 self.extract_policy()
                 self.evaluate_policy()
             V_new = self.V.copy()
-            print(np.linalg.norm(V_new))
             V_list.append(V_new)
             
-            if np.linalg.norm(V_new - V_old, ord=np.inf) < 1e-13:
+            if np.linalg.norm(V_new - V_old, ord=np.inf) < 1e-10:
                 if not silence:
                     print("策略迭代收敛，迭代次数为：%d" % iter)
                 break                
@@ -188,7 +188,9 @@ class MDP():
             silence:
                 是否不输出任何信息？    
         '''
-        
+        if self.entropy_coeff is None:
+            raise NotImplementedError("目前只支持无熵正则化的值迭代算法！")
+                
         def proj_to_simplex(prob_policy):
             
             for s in range(self.S_size):
@@ -312,6 +314,7 @@ class MDP():
             iter += 1
             self.evaluate_policy(use_prob_policy=True)
             V_new = self.V.copy()
+            # print("Softmax descent iter %d, log diff: %.4f" % (iter, np.log((V_star - V_new).mean() + 1e-23)))
             V_list.append(V_new)
             
             if np.linalg.norm(V_new - V_star, ord=np.inf) < 1e-13:
@@ -323,20 +326,20 @@ class MDP():
                                    self.prob_policy,
                                    init_dist=np.ones((self.S_size, )) / self.S_size,
                                    gamma=self.gamma)   
-            if mode == "softmax":
+            if self.entropy_coeff is None:
                 A = (self.Q - self.V.reshape((-1,1)))
+            else:
+                A = (self.Q - self.V.reshape((-1,1))) - self.entropy_coeff * np.log(self.prob_policy + 1e-23)
+            if mode == "softmax":
                 grad = 1 / (1-self.gamma) * d.reshape((-1,1)) * self.prob_policy * add_noise(A, noise)
                 self.softmax_param = self.softmax_param + grad * step_size
             elif mode == "adaptive":
-                A = (self.Q - self.V.reshape((-1,1)))
                 grad = 1 / (1-self.gamma) * d.reshape((-1,1)) * add_noise(A, noise)
                 self.softmax_param = self.softmax_param + grad * step_size
             elif mode == "NPG":
-                A = (self.Q - self.V.reshape((-1,1)))
                 grad = add_noise(A, noise)
                 self.softmax_param = self.softmax_param + grad * step_size
             elif mode == "temp":
-                A = (self.Q - self.V.reshape((-1,1)))
                 grad = 1 / (1-self.gamma) * d.reshape((-1,1)) * self.prob_policy ** temp * add_noise(A, noise)
                 self.softmax_param = self.softmax_param + grad * step_size                
             
@@ -585,7 +588,7 @@ class MDP():
             Q_pi = np.stack([np.diag(_) for _ in np.einsum('ijk,ikl->ijl', P, np.transpose(rewards, [0,2,1]) + gamma*self.V.reshape((-1,1)))])
             self.Q = Q_pi.transpose()
         else:
-            V_pi = np.linalg.inv(np.eye(self.S_size) - gamma * P_pi) @ (r_pi.reshape((-1,1)) + self.entropy_coeff * np.sum(prob_policy * np.log(prob_policy + 1e-23), axis=1, keepdims=True))
+            V_pi = np.linalg.inv(np.eye(self.S_size) - gamma * P_pi) @ (r_pi.reshape((-1,1)) - self.entropy_coeff * np.sum(prob_policy * np.log(prob_policy + 1e-23), axis=1, keepdims=True))
             self.V = V_pi.reshape((-1,))
             
             Q_pi = np.stack([np.diag(_) for _ in np.einsum('ijk,ikl->ijl', P, np.transpose(rewards, [0,2,1]) + gamma*self.V.reshape((-1,1)))])
@@ -632,6 +635,7 @@ class MDP():
         '''
         Soft policy iteration.
         '''
+        assert self.entropy_coeff is not None, "熵正则化系数不能为空！"
         self.prob_policy = np.exp(self.Q / self.entropy_coeff - np.max(self.Q / self.entropy_coeff, axis=1, keepdims=True))
         self.prob_policy = self.prob_policy / np.sum(self.prob_policy, axis=1, keepdims=True)
         self.prob_policy = self.prob_policy.astype(np.float64)

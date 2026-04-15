@@ -115,3 +115,14 @@ def phi_poly_factory(p=1):
         x = np.array(x)
         return np.power(1+p*x, p)
     return phi_poly
+
+def solve_zero_point_by_binary_searching(f):
+    # The function f is assumed to be monotone decreasing. We want to find the zero point of f.
+    left, right = -1e10, 1e10
+    while right - left > 1e-10:
+        mid = (left + right) / 2
+        if f(mid) > 0:
+            left = mid
+        else:
+            right = mid
+    return (left + right) / 2

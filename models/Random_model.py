@@ -33,6 +33,7 @@ class RandomMDP():
         self.rewards = np.random.uniform(size=(A_size, S_size))
         self.rewards = np.expand_dims(self.rewards, axis=2).repeat(S_size, 2)
         
+        self.entropy_coeff = entropy_coeff
         self.mdp = MDP(self.P, self.gamma, self.rewards, entropy_coeff=entropy_coeff)
         
         
