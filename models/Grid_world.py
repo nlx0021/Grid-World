@@ -167,7 +167,7 @@ class Grid_world():
         assert mode["alg"] in ["value_iteration", "policy_iteration",
                                "projected_Q_descent", "policy_descent",
                                "softmax", "softmax_adaptive", "softmax_temp", "softmax_NPG",
-                               "phi", "escort", "escort_normalized"]
+                               "phi", "escort", "escort_normalized", "mirror_descent"]
         
         alg = mode["alg"]
         
@@ -213,6 +213,11 @@ class Grid_world():
             phi = mode["phi"]
             return_dict = self.mdp.phi_policy_update(phi, max_iter=max_iter, step_size=step_size,
                                                      need_return=need_return, silence=verbose, noise=noise, seed=seed)
+        elif alg == "mirror_descent":
+            mirror_funcs = mode["mirror_funcs"]
+            return_dict = self.mdp.mirror_descent(mirror_funcs, max_iter=max_iter, step_size=step_size,
+                                                  need_return=need_return, silence=verbose, noise=noise, seed=seed)
+                        
         if need_return:
             return return_dict      
         

@@ -2,7 +2,7 @@ import numpy as np
 import random
 from tqdm import tqdm
 
-from utils.utils import compute_visit_prob, add_noise
+from utils.utils import compute_visit_prob, add_noise, solve_zero_point_by_binary_searching
 
 class MDP():
     
@@ -67,7 +67,7 @@ class MDP():
                 是否进行输出？
         '''
         
-        if self.entropy_coeff is None:
+        if self.entropy_coeff is not None:
             raise NotImplementedError("目前只支持无熵正则化的值迭代算法！")
         
         V = self.V.copy()
@@ -188,7 +188,7 @@ class MDP():
             silence:
                 是否不输出任何信息？    
         '''
-        if self.entropy_coeff is None:
+        if self.entropy_coeff is not None:
             raise NotImplementedError("目前只支持无熵正则化的值迭代算法！")
                 
         def proj_to_simplex(prob_policy):
@@ -540,7 +540,91 @@ class MDP():
             
             return return_dict
         
+    def mirror_descent(self,
+                        mirror_funcs,
+                        max_iter=5000,
+                        step_size=1,
+                        need_return=False,
+                        silence=False,
+                        noise=None,
+                        seed=21):
+        '''
+        镜像下降算法
+        参数：
+            mirror_funcs:
+                镜像函数列表。
+            max_iter:
+                迭代次数的上限。
+            step_size:
+                步长值。
+            need_return:
+                是否需要返回V_list？
+            silence:
+                是否不输出任何信息？
+        '''     
+        
+        POLICY_TOLERANCE = 1e-13
+            
+        def update_policy(current_prob_policy,
+                          Q,
+                          step_size,
+                          psi_prime,
+                          psi_prime_inv):            
+            
+            updated_prob_policy = current_prob_policy.copy()
+            for s in range(self.S_size):
+                f = lambda lamb : np.sum(np.maximum(psi_prime_inv(psi_prime(current_prob_policy[s]) + step_size * Q[s] - lamb), 0)) - 1
+                lambda_zero_point = solve_zero_point_by_binary_searching(f)
+                updated_prob_policy[s] = psi_prime_inv(psi_prime(current_prob_policy[s]) + step_size * Q[s] - lambda_zero_point)
+                updated_prob_policy[s] = np.clip(updated_prob_policy[s], a_min=1e-20, a_max=1)
+                updated_prob_policy[s] = updated_prob_policy[s] / np.sum(updated_prob_policy[s])
+                    
+            return updated_prob_policy
+            
     
+        iter = 0
+        return_dict = {}
+        V_list = []
+        policy_list = []
+        grad_list = []
+        A_list = []
+        
+        # Mirror funcs.
+        psi, psi_prime, psi_prime_inv = mirror_funcs
+        
+        # First we run a baseline.
+        self.policy_iteration(max_iter=1000,
+                                silence=True)
+        
+        V_star = self.V.copy()
+        self.init_policy_and_V(random_init=True, seed=seed)
+        
+        while True:
+            iter += 1
+            self.evaluate_policy(use_prob_policy=True)
+            V_new = self.V.copy()
+            V_list.append(V_new)
+            
+            if np.linalg.norm(V_new - V_star, ord=np.inf) < 1e-13:
+                if not silence:
+                    print("镜像下降算法收敛，迭代次数为：%d" % iter)
+                break             
+
+            self.prob_policy = update_policy(self.prob_policy, self.Q, step_size, psi_prime, psi_prime_inv)
+            
+            policy_list.append(self.prob_policy.copy())       
+            
+            if iter >= max_iter:
+                if not silence:
+                    print("镜像下降算法未收敛！")
+                break
+            
+        return_dict["V_list"] = V_list
+        return_dict["policy_list"] = policy_list
+        
+        return return_dict
+        
+        
     def evaluate_policy(self, epsilon=None,
                         use_prob_policy=False):
         '''

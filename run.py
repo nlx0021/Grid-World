@@ -67,7 +67,7 @@ def run(model: RandomMDP,
             kappa_dict[str([mode, step_size])] = kappa
         
         log_diff_dict[str([mode, step_size])] = (log_diff_list)
-        max_iter = min(max_iter, len(log_diff_list))
+        max_iter = max(0, len(log_diff_list), max_iter)
     
     if need_kappa:
         print("Kappa dict: ", kappa_dict)
@@ -154,7 +154,7 @@ if __name__ == '__main__':
     S_size = 20
     A_size = 10
     gamma = .9
-    entropy_coeff = 0.1
+    entropy_coeff = None
     
     seed = np.random.randint(65536)
     seed = 21
@@ -174,14 +174,14 @@ if __name__ == '__main__':
     #                    punish_reward=-1,
     #                    entropy_coeff=0.000001)  
     
-    # Compute the beta.
-    f = lambda x: np.exp(-2*x * (1+entropy_coeff * np.log(A_size)) / (1-gamma)**2) - entropy_coeff * x / (2*(1-gamma))
-    beta = solve_zero_point_by_binary_searching(f)
-    import pdb; pdb.set_trace()
+    # # Compute the beta.
+    # f = lambda x: np.exp(-2*x * (1+entropy_coeff * np.log(A_size)) / (1-gamma)**2) - entropy_coeff * x / (2*(1-gamma))
+    # beta = solve_zero_point_by_binary_searching(f)
+    # import pdb; pdb.set_trace()
     
     run(
         model=model,
-        max_iter=10000,
+        max_iter=5000,
         param_list=[
             # [{"alg": "escort", "p": 4}, 1],
             # [{"alg": "phi", "label": "Poly(2)", "phi": phi_poly_factory(2)}, 0.01],
@@ -190,17 +190,17 @@ if __name__ == '__main__':
             # [{"alg": "phi", "label": "Exp(1,1)", "phi": phi_exp_inv_factory(1, 1)}, 1],
             # [{"alg": "policy_descent"}, 10],
             # [{"alg": "softmax_adaptive", "label": "reshaped SPG"}, 1],
-            [{"alg": "softmax", "label": "$\eta=0.01$"}, 0.1],
-            [{"alg": "softmax", "label": "$\eta=1$"}, 1], 
-            [{"alg": "softmax", "label": "$\eta=100$"}, 100],
-            [{"alg": "softmax", "label": "$\eta=1000$"}, 1000],
+            # [{"alg": "softmax", "label": "$\eta=0.01$"}, 0.1],
+            [{"alg": "mirror_descent", "label": "Tsallis q=1.5", "mirror_funcs": tsallis_entropy_funcs_factory(1.5)}, 1],
+            [{"alg": "mirror_descent", "label": "Tsallis q=2.5", "mirror_funcs": tsallis_entropy_funcs_factory(2.5)}, 1],
+            [{"alg": "projected_Q_descent", "label": "Projected Q-descent"}, 1],
         ],
         metric="rho",
         exp_mode="multi-run",
         noise=None,
         seed=21,
-        need_kappa=True,
-        title="Convergence of Softmax Policy Gradient with Different Step Sizes"
+        need_kappa=False,
+        title="PQA vs Tsallis q=1.5"
     )
     
     # model.TD_policy_evaluation(epsilon=0, max_iter=100000, fix_steps_size=1.2, step_size_scale=True, max_length=2)

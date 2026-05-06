@@ -119,10 +119,29 @@ def phi_poly_factory(p=1):
 def solve_zero_point_by_binary_searching(f):
     # The function f is assumed to be monotone decreasing. We want to find the zero point of f.
     left, right = -1e10, 1e10
+    ct = 0
     while right - left > 1e-10:
         mid = (left + right) / 2
         if f(mid) > 0:
             left = mid
         else:
             right = mid
+        ct += 1
+        if ct > 1000:
+            print("Binary searching failed: cannot find the zero point within 1000 iterations.")
+            break
     return (left + right) / 2
+
+def tsallis_entropy_funcs_factory(q):
+    assert q > 1
+    
+    def psi(x):
+        return (np.power(x, q) - 1) / (q-1)
+    
+    def psi_prime(x):
+        return np.power(x, q-1) * q / (q-1)
+    
+    def psi_prime_inv(x):
+        return np.power(x * (q-1)  / q, 1/(q-1))
+    
+    return psi, psi_prime, psi_prime_inv
