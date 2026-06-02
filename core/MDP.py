@@ -2,7 +2,7 @@ import numpy as np
 import random
 from tqdm import tqdm
 
-from utils.utils import compute_visit_prob, add_noise, solve_zero_point_by_binary_searching
+from utils.utils import compute_visit_prob, add_noise, solve_zero_point_monotone_decreasing
 
 class MDP():
     
@@ -565,20 +565,245 @@ class MDP():
         
         POLICY_TOLERANCE = 1e-13
             
-        def update_policy(current_prob_policy,
-                          Q,
-                          step_size,
-                          psi_prime,
-                          psi_prime_inv):            
-            
-            updated_prob_policy = current_prob_policy.copy()
-            for s in range(self.S_size):
-                f = lambda lamb : np.sum(np.maximum(psi_prime_inv(psi_prime(current_prob_policy[s]) + step_size * Q[s] - lamb), 0)) - 1
-                lambda_zero_point = solve_zero_point_by_binary_searching(f)
-                updated_prob_policy[s] = psi_prime_inv(psi_prime(current_prob_policy[s]) + step_size * Q[s] - lambda_zero_point)
-                updated_prob_policy[s] = np.clip(updated_prob_policy[s], a_min=1e-20, a_max=1)
-                updated_prob_policy[s] = updated_prob_policy[s] / np.sum(updated_prob_policy[s])
-                    
+        def update_policy(
+            current_prob_policy,
+            Q,
+            step_size,
+            psi_prime,
+            psi_prime_inv,
+            mirror_info,
+            tol=POLICY_TOLERANCE,
+            max_iter=200,
+            max_expand=200,
+            min_prob=1e-35
+        ):
+            """
+            Exact separable PMD update by one-dimensional dual search.
+
+            For each state s, solve
+                p_a(lambda) = 0,
+                    if theta_a - lambda <= psi'(0+) and psi'(0+) is finite;
+
+                p_a(lambda) = (psi')^{-1}(theta_a - lambda),
+                    otherwise,
+
+            where
+                theta_a = psi'(pi_k(a|s)) + eta Q(s,a),
+
+            and lambda is chosen such that
+                sum_a p_a(lambda) = 1.
+
+            Parameters
+            ----------
+            current_prob_policy : np.ndarray, shape (S, A)
+                Current policy. Each row must sum to one.
+
+            Q : np.ndarray, shape (S, A)
+                Current Q value.
+
+            step_size : float
+                PMD step size eta.
+
+            psi_prime : callable
+                First derivative psi'.
+
+            psi_prime_inv : callable
+                Inverse of psi'.
+
+            mirror_info : dict
+                Required keys:
+                    psi_prime_zero : float
+                        psi'(0+). Use -np.inf if psi'(0+) = -inf.
+
+                    inv_score_lower : float
+                        Lower endpoint of the valid input domain of psi_prime_inv.
+
+                    inv_score_upper : float
+                        Upper endpoint of the valid input domain of psi_prime_inv.
+
+            Returns
+            -------
+            updated_prob_policy : np.ndarray, shape (S, A)
+            """
+            current_prob_policy = np.asarray(current_prob_policy, dtype=float)
+            Q = np.asarray(Q, dtype=float)
+
+            if current_prob_policy.shape != Q.shape:
+                raise ValueError("current_prob_policy and Q must have the same shape.")
+
+            psi_prime_zero = mirror_info["psi_prime_zero"]
+            psi_prime_one = mirror_info["psi_prime_one"]
+            inv_score_lower = mirror_info["inv_score_lower"]
+            inv_score_upper = mirror_info["inv_score_upper"]
+
+            S_size, A_size = current_prob_policy.shape
+            updated_prob_policy = np.empty_like(current_prob_policy)
+
+            for s in range(S_size):
+                current_p = current_prob_policy[s].copy()
+
+                if np.any(current_p < 0):
+                    raise ValueError("Policy contains negative probabilities.")
+
+                if not np.isclose(np.sum(current_p), 1.0, atol=1e-8):
+                    raise ValueError("Each policy row must sum to one.")
+
+                # Barrier-at-zero case: psi'(0+)=-inf requires strictly positive policy.
+                if np.isneginf(psi_prime_zero):
+                    current_p = np.maximum(current_p, min_prob)
+                    current_p = current_p / np.sum(current_p)
+                
+                # Barrier-at-one case: psi'(1-)=+inf requires strictly < 1 policy.
+                if np.isposinf(psi_prime_one):
+                    current_p = np.minimum(current_p, 1.0 - min_prob)
+                    current_p = current_p / np.sum(current_p)
+
+                theta = psi_prime(current_p) + step_size * Q[s]
+
+                def p_from_lambda(lamb):
+                    z = theta - lamb
+                    p = np.zeros_like(z, dtype=float)
+
+                    # Lower active set: if psi'(0+) is finite, scores below it map to p=0.
+                    if np.isfinite(psi_prime_zero):
+                        active_lower = z <= psi_prime_zero
+                    else:
+                        active_lower = np.zeros_like(z, dtype=bool)
+
+                    active_mid = ~active_lower
+
+                    # Domain safety for psi_prime_inv.
+                    # We only call psi_prime_inv on active_mid coordinates.
+                    if np.any(active_mid):
+                        z_mid = z[active_mid]
+
+                        if np.isfinite(inv_score_lower) and np.any(z_mid <= inv_score_lower):
+                            return None
+
+                        if np.isfinite(inv_score_upper) and np.any(z_mid >= inv_score_upper):
+                            return None
+
+                        p_mid = psi_prime_inv(z_mid)
+                        p_mid = np.asarray(p_mid, dtype=float)
+
+                        if np.any(~np.isfinite(p_mid)):
+                            return None
+
+                        p[active_mid] = p_mid
+
+                    # Numerical safety. Lower clipping is already handled by active_lower.
+                    p = np.maximum(p, 0.0)
+
+                    if np.any(~np.isfinite(p)):
+                        return None
+
+                    return p
+
+                def f(lamb):
+                    p = p_from_lambda(lamb)
+
+                    # If lambda is outside the valid inverse domain on the high-score side,
+                    # then lambda is too small and the mass should be treated as too large.
+                    if p is None:
+                        z = theta - lamb
+                        if np.isfinite(inv_score_upper) and np.any(z >= inv_score_upper):
+                            return np.inf
+                        return np.nan
+
+                    return np.sum(p) - 1.0
+
+                # -------------------------------------------------
+                # Build a valid bracket [left, right]
+                # f(lambda) is non-increasing in lambda.
+                # Need f(left) >= 0 and f(right) <= 0.
+                # -------------------------------------------------
+
+                if np.isfinite(inv_score_upper):
+                    # Example: Tsallis 0<q<1 has inv_score_upper = 0.
+                    # Need theta_a - lambda < inv_score_upper for all active coordinates.
+                    boundary = np.max(theta - inv_score_upper)
+                    eps = 1e-12 * max(1.0, abs(boundary), np.max(np.abs(theta)))
+                    left = boundary + eps
+                else:
+                    left = float(np.median(theta) - 1.0)
+
+                f_left = f(left)
+
+                expand = 1.0
+                count = 0
+                while (np.isnan(f_left)) or (f_left < 0):
+                    if np.isfinite(inv_score_upper):
+                        # Move closer to the boundary from the valid side.
+                        # This should increase the total mass.
+                        boundary = np.max(theta - inv_score_upper)
+                        eps *= 0.1
+                        left = boundary + eps
+                    else:
+                        left -= expand
+                        expand *= 2.0
+
+                    f_left = f(left)
+                    count += 1
+
+                    if count > max_expand:
+                        raise RuntimeError(
+                            "Failed to find left bracket for lambda. "
+                            "Check psi_prime_inv domain and mirror_info."
+                        )
+
+                right = left + 1.0
+                f_right = f(right)
+
+                expand = 1.0
+                count = 0
+                while (np.isnan(f_right)) or (f_right > 0):
+                    right += expand
+                    expand *= 2.0
+                    f_right = f(right)
+                    count += 1
+
+                    if count > max_expand:
+                        raise RuntimeError("Failed to find right bracket for lambda.")
+
+                # -------------------------------------------------
+                # Binary search
+                # -------------------------------------------------
+
+                l, r = left, right
+
+                for _ in range(max_iter):
+                    mid = 0.5 * (l + r)
+                    f_mid = f(mid)
+
+                    if np.isnan(f_mid):
+                        raise FloatingPointError(
+                            "Binary search encountered NaN. "
+                            "Check mirror_info or psi_prime_inv domain."
+                        )
+
+                    if abs(f_mid) <= tol:
+                        l = r = mid
+                        break
+
+                    if f_mid > 0:
+                        l = mid
+                    else:
+                        r = mid
+
+                lambda_star = 0.5 * (l + r)
+                new_p = p_from_lambda(lambda_star)
+
+                if new_p is None or np.any(~np.isfinite(new_p)):
+                    raise FloatingPointError("Non-finite updated probability after solving lambda.")
+
+                total = np.sum(new_p)
+
+                if total <= 0 or not np.isfinite(total):
+                    raise FloatingPointError("Updated probability has invalid total mass.")
+
+                # Only remove tiny numerical error.
+                updated_prob_policy[s] = new_p / total
+
             return updated_prob_policy
             
     
@@ -590,7 +815,7 @@ class MDP():
         A_list = []
         
         # Mirror funcs.
-        psi, psi_prime, psi_prime_inv = mirror_funcs
+        psi, psi_prime, psi_prime_inv, mirror_info = mirror_funcs
         
         # First we run a baseline.
         self.policy_iteration(max_iter=1000,
@@ -609,8 +834,18 @@ class MDP():
                 if not silence:
                     print("镜像下降算法收敛，迭代次数为：%d" % iter)
                 break             
-
-            self.prob_policy = update_policy(self.prob_policy, self.Q, step_size, psi_prime, psi_prime_inv)
+            
+            try:
+                self.prob_policy = update_policy(
+                    self.prob_policy,
+                    self.Q,
+                    step_size,
+                    psi_prime,
+                    psi_prime_inv,
+                    mirror_info
+                )
+            except Exception as e:
+                import pdb; pdb.set_trace()
             
             policy_list.append(self.prob_policy.copy())       
             

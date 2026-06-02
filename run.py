@@ -7,8 +7,10 @@ from tqdm import tqdm
 from core.MDP import MDP
 from utils.random_board import generate_random_board, generate_one_goal_board
 from utils.utils import *
+from utils.mirror_maps import *
 from models.Grid_world import Grid_world
 from models.Random_model import RandomMDP
+from models.Multi_optimal_mdp import MultiOptimalMDP
 
 EPSILON = 1e-21
 
@@ -25,16 +27,18 @@ def run(model: RandomMDP,
         param_list:
             [[mode1, step1], [mode2, step2] ... ]
     '''
-    assert exp_mode in ["multi-run", "local-rate", "policy-converge"]
-    if exp_mode != "multi-run":
+    assert exp_mode in ["multi-run", "local-rate", "policy-converge", "policy-converge-states", "sub-optimal-states"], "Unsupported exp_mode."
+    if exp_mode not in ["multi-run", "policy-converge"]:
         assert len(param_list) == 1, "Only support one algorithm."
         assert noise is None, "Please do not add noise."
     
     log_diff_dict = {str(param): [] for param in param_list}
+    policy_dict = {str(param): [] for param in param_list}
     model.solve_mdp(mode={"alg": "policy_iteration"},
                     epsilon=EPSILON)
     
     V_star = model.mdp.V.copy()
+    Q_star = model.mdp.Q.copy()
     delta = model.mdp.compute_delta()
     kappa_dict = {}
     
@@ -50,8 +54,8 @@ def run(model: RandomMDP,
                                         noise=noise,
                                         seed=seed)
         V_list = return_dict["V_list"]
-        if exp_mode == "policy-converge":
-            policy_list = return_dict["policy_list"]
+        policy_list = return_dict["policy_list"]
+        policy_dict[str([mode, step_size])] = (policy_list)
         if metric == "rho":
             log_diff_list = np.array([np.log((V_star - V).mean() + EPSILON) for V in V_list])
         elif metric == "infty":
@@ -82,9 +86,9 @@ def run(model: RandomMDP,
             label = mode.get("label", mode["alg"])
             if need_kappa:
                 label = label + " ($\kappa$=%.4f)" % kappa_dict[str([mode, step_size])]
-            ax.plot(np.arange(max_iter), diff_lists[:max_iter], '-', label=str(label))
+            ax.plot(diff_lists[:max_iter], '-', label=str(label))
         # Clip the y-axis to better show the difference.
-        ax.set_ylim(-13, 3)
+        ax.set_ylim(-21, 3)
         ax.set_xlabel("iters")
         ax.set_ylabel(r'log $V^*(\rho) - V^k(\rho)$' if metric == "rho" else f"log {metric}")
         # Make Legend larger and clearer.
@@ -97,8 +101,8 @@ def run(model: RandomMDP,
         ax.title.set_size(15)
         ax.grid(True)
         ax.grid(alpha=0.3)
-        plt.show()
-        # plt.savefig("./outputs/Convergence Curve.png")   # Hard Coding FIXME
+        # plt.show()
+        plt.savefig("./outputs/Mirror_descents_multi_optimal.png")   # Hard Coding FIXME
     
     elif exp_mode == "local-rate":
         assert mode.get("phi", None) is not None, "Please provide the phi function."
@@ -125,54 +129,98 @@ def run(model: RandomMDP,
         #                 epsilon=EPSILON, need_return=True)
         # last_policy = return_dict["policy_list"][-1]
         # Otherwise
-        last_policy = policy_list[-1]
-        # Search for not monotonic state.
-        _temp = []
-        for s in tqdm(range(model.mdp.S_size)):
-            Divergence_list = np.array([np.linalg.norm(last_policy[s] - policy[s]) ** 2 for policy in policy_list])
-            # diff = Divergence_list[1:] - Divergence_list[:-1]
-            # if np.sum(diff > 1e-5) > 0:
-            #     print("发现非单调: 状态 %d" % s)
-            #     import pdb; pdb.set_trace()
-            #     break
-            _temp.append(Divergence_list)
-        
-        Divergence_result = np.mean(np.array(_temp), axis=0)
-        
-        fig = plt.figure(figsize=(5,4))
         ax = plt.axes()
-        ax.plot(Divergence_result, '-', label=str("Divergence curve"))
-        ax.legend()
-        ax.grid(True)
-        ax.grid(alpha=0.3)        
-        plt.show()
-        print(last_policy)
-    
-    
+        for (mode, step_size) in param_list:
+            policy_list = policy_dict[str([mode, step_size])]
+            label = mode.get("label", mode["alg"])
+            last_policy = policy_list[-1]
+            # Search for not monotonic state.
+            _temp = []
+            for s in tqdm(range(model.mdp.S_size)):
+                Divergence_list = np.array([np.linalg.norm(last_policy[s] - policy[s]) ** 2 for policy in policy_list])
+                # diff = Divergence_list[1:] - Divergence_list[:-1]
+                # if np.sum(diff > 1e-5) > 0:
+                #     print("发现非单调: 状态 %d" % s)
+                #     import pdb; pdb.set_trace()
+                #     break
+                _temp.append(Divergence_list)
+            #     ax.plot(np.log(Divergence_list+1e-23), '-', label=label)
+            # plt.show()
+            # plt.savefig("outputs/policy_convergence_states.png", pad_inches=0.2, bbox_inches="tight")
+            # import pdb; pdb.set_trace()
+            
+            Divergence_result = np.mean(np.array(_temp), axis=0)
+            
+            ax.plot(np.log(Divergence_result), '-', label=label)
+            ax.legend()
+            ax.grid(True)
+            ax.grid(alpha=0.3)        
+            # plt.show()
+            plt.savefig("outputs/policy_convergence.png", pad_inches=0.2, bbox_inches="tight")
+            print(last_policy)
+            
+    elif exp_mode == "policy-converge-states":
+        ax = plt.axes()
+        for (mode, step_size) in param_list:
+            policy_list = policy_dict[str([mode, step_size])]
+            label = mode.get("label", mode["alg"])
+            last_policy = policy_list[-1]
+            # Search for not monotonic state.
+            _temp = []
+            for s in tqdm(range(model.mdp.S_size)):
+                Divergence_list = np.array([np.linalg.norm(last_policy[s] - policy[s]) ** 2 for policy in policy_list])
+                non_optimal_actions = np.where(Q_star[s] < V_star[s] - 1e-15)[0]
+                ax.plot(np.log(Divergence_list+1e-23), '-', label=label)
+                import pdb; pdb.set_trace()
+            # plt.show()
+            plt.savefig("outputs/policy_convergence_states.png", pad_inches=0.2, bbox_inches="tight")
+            
+    elif exp_mode == "sub-optimal-states":
+        ax = plt.axes()
+        for (mode, step_size) in param_list:
+            policy_list = policy_dict[str([mode, step_size])]
+            label = mode.get("label", mode["alg"])
+            for s in tqdm(range(model.mdp.S_size)):
+                # Optimal action is : {a: Q_star[s, a] \approx V_star[s]}
+                non_optimal_actions = np.where(Q_star[s] < V_star[s] - 1e-15)[0]
+                if len(non_optimal_actions) > 0:
+                    sub_optimal_prob = np.array([np.sum(policy[s][non_optimal_actions]) for policy in policy_list])
+                    ax.plot(np.log(sub_optimal_prob+1e-23), '-', label=label)
+                import pdb; pdb.set_trace()   
+            # plt.show()
+            plt.savefig("outputs/sub_optimal_states.png", pad_inches=0.2, bbox_inches="tight")
+
 if __name__ == '__main__':
     
-    S_size = 20
+    S_size = 50
     A_size = 10
     gamma = .9
     entropy_coeff = None
     
-    seed = np.random.randint(65536)
-    seed = 21
-    model = RandomMDP(S_size=S_size,
-                      A_size=A_size,
-                      gamma=gamma,
-                      seed=seed,
-                      entropy_coeff=entropy_coeff)   
+    # seed = np.random.randint(65536)
+    # seed = 21
+    # model = MultiOptimalMDP(S_size=S_size,
+    #                        A_size=A_size,
+    #                        gamma=gamma,
+    #                        seed=seed,
+    #                        num_opt_actions=2,
+    #                        entropy_coeff=entropy_coeff)
+    
+    # model = RandomMDP(S_size=S_size,
+    #                   A_size=A_size,
+    #                   gamma=gamma,
+    #                   seed=seed,
+    #                   entropy_coeff=entropy_coeff)   
     # np.random.seed(21)
-    # H, W = 10, 10
-    # board = generate_one_goal_board(H, W, random=False)
+    H, W = 4, 4
+    board = generate_one_goal_board(H, W, random=False)
     # board = generate_random_board(H, W, p_1=.2, p_2=.1)
         
-    # model = Grid_world(board,
-    #                    gamma,
-    #                    win_reward=1,
-    #                    punish_reward=-1,
-    #                    entropy_coeff=0.000001)  
+    model = Grid_world(board,
+                       gamma,
+                       win_reward=1,
+                       punish_reward=-1,
+                       entropy_coeff=entropy_coeff)  
     
     # # Compute the beta.
     # f = lambda x: np.exp(-2*x * (1+entropy_coeff * np.log(A_size)) / (1-gamma)**2) - entropy_coeff * x / (2*(1-gamma))
@@ -181,7 +229,7 @@ if __name__ == '__main__':
     
     run(
         model=model,
-        max_iter=5000,
+        max_iter=3000,
         param_list=[
             # [{"alg": "escort", "p": 4}, 1],
             # [{"alg": "phi", "label": "Poly(2)", "phi": phi_poly_factory(2)}, 0.01],
@@ -191,16 +239,22 @@ if __name__ == '__main__':
             # [{"alg": "policy_descent"}, 10],
             # [{"alg": "softmax_adaptive", "label": "reshaped SPG"}, 1],
             # [{"alg": "softmax", "label": "$\eta=0.01$"}, 0.1],
-            [{"alg": "mirror_descent", "label": "Tsallis q=1.5", "mirror_funcs": tsallis_entropy_funcs_factory(1.5)}, 1],
-            [{"alg": "mirror_descent", "label": "Tsallis q=2.5", "mirror_funcs": tsallis_entropy_funcs_factory(2.5)}, 1],
-            [{"alg": "projected_Q_descent", "label": "Projected Q-descent"}, 1],
+            # [{"alg": "mirror_descent", "label": "Tsallis q=1.5", "mirror_funcs": tsallis_entropy_funcs_factory(1.5)}, 10],
+            # [{"alg": "mirror_descent", "label": "Tsallis q=2", "mirror_funcs": tsallis_entropy_funcs_factory(2)}, 2],
+            # [{"alg": "mirror_descent", "label": "Tsallis q=3", "mirror_funcs": tsallis_entropy_funcs_factory(3)}, 10],
+            # [{"alg": "mirror_descent", "label": "Tsallis q=0.5", "mirror_funcs": tsallis_entropy_funcs_factory(0.5)}, 10],
+            # [{"alg": "mirror_descent", "label": "Shannon", "mirror_funcs": shannon_entropy_funcs_factory()}, 10],
+            # [{"alg": "mirror_descent", "label": "Fermi-Dirac", "mirror_funcs": fermi_dirac_entropy_funcs_factory()}, 10],
+            [{"alg": "mirror_descent", "label": "Hellinger", "mirror_funcs": hellinger_funcs_factory()}, 10],
+            # [{"alg": "mirror_descent", "label": "log-bariier", "mirror_funcs": log_barrier_funcs_factory()}, 10],
+            # [{"alg": "projected_Q_descent", "label": "Projected Q-descent"}, 1],
         ],
         metric="rho",
-        exp_mode="multi-run",
+        exp_mode="policy-converge-states",
         noise=None,
         seed=21,
         need_kappa=False,
-        title="PQA vs Tsallis q=1.5"
+        title="Mirror Descents"
     )
     
     # model.TD_policy_evaluation(epsilon=0, max_iter=100000, fix_steps_size=1.2, step_size_scale=True, max_length=2)

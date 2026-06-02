@@ -116,11 +116,10 @@ def phi_poly_factory(p=1):
         return np.power(1+p*x, p)
     return phi_poly
 
-def solve_zero_point_by_binary_searching(f):
+def solve_zero_point_by_binary_searching(f, left=-1e10, right=1e10, tol=1e-10):
     # The function f is assumed to be monotone decreasing. We want to find the zero point of f.
-    left, right = -1e10, 1e10
     ct = 0
-    while right - left > 1e-10:
+    while right - left > tol:
         mid = (left + right) / 2
         if f(mid) > 0:
             left = mid
@@ -130,18 +129,39 @@ def solve_zero_point_by_binary_searching(f):
         if ct > 1000:
             print("Binary searching failed: cannot find the zero point within 1000 iterations.")
             break
+    # print(ct)
+    # print(mid)
+    # print(f(mid))
+    # import pdb; pdb.set_trace()
     return (left + right) / 2
 
-def tsallis_entropy_funcs_factory(q):
-    assert q > 1
-    
-    def psi(x):
-        return (np.power(x, q) - 1) / (q-1)
-    
-    def psi_prime(x):
-        return np.power(x, q-1) * q / (q-1)
-    
-    def psi_prime_inv(x):
-        return np.power(x * (q-1)  / q, 1/(q-1))
-    
-    return psi, psi_prime, psi_prime_inv
+def solve_zero_point_monotone_decreasing(f, left, right, tol=1e-12, max_iter=200):
+    """
+    Solve f(x)=0 for a continuous non-increasing function.
+    Require f(left) >= 0 and f(right) <= 0.
+    """
+    f_left = f(left)
+    f_right = f(right)
+
+    if not np.isfinite(f_left) or not np.isfinite(f_right):
+        raise ValueError(f"Non-finite bracket values: f(left)={f_left}, f(right)={f_right}")
+
+    if f_left < 0 or f_right > 0:
+        raise ValueError(
+            f"Invalid bracket: f(left)={f_left}, f(right)={f_right}. "
+            "Need f(left) >= 0 and f(right) <= 0."
+        )
+
+    for _ in range(max_iter):
+        mid = 0.5 * (left + right)
+        f_mid = f(mid)
+
+        if abs(f_mid) <= tol:
+            return mid
+
+        if f_mid > 0:
+            left = mid
+        else:
+            right = mid
+
+    return 0.5 * (left + right)
