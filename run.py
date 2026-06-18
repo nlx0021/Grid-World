@@ -11,6 +11,7 @@ from utils.mirror_maps import *
 from models.Grid_world import Grid_world
 from models.Random_model import RandomMDP
 from models.Multi_optimal_mdp import MultiOptimalMDP
+from models.Trivial_mdp import TrivialMDP
 
 EPSILON = 1e-21
 
@@ -171,7 +172,6 @@ def run(model: RandomMDP,
                 Divergence_list = np.array([np.linalg.norm(last_policy[s] - policy[s]) ** 2 for policy in policy_list])
                 non_optimal_actions = np.where(Q_star[s] < V_star[s] - 1e-15)[0]
                 ax.plot(np.log(Divergence_list+1e-23), '-', label=label)
-                import pdb; pdb.set_trace()
             # plt.show()
             plt.savefig("outputs/policy_convergence_states.png", pad_inches=0.2, bbox_inches="tight")
             
@@ -192,13 +192,13 @@ def run(model: RandomMDP,
 
 if __name__ == '__main__':
     
-    S_size = 50
-    A_size = 10
+    S_size = 20
+    A_size = 5
     gamma = .9
     entropy_coeff = None
     
     # seed = np.random.randint(65536)
-    # seed = 21
+    seed = 21
     # model = MultiOptimalMDP(S_size=S_size,
     #                        A_size=A_size,
     #                        gamma=gamma,
@@ -212,15 +212,18 @@ if __name__ == '__main__':
     #                   seed=seed,
     #                   entropy_coeff=entropy_coeff)   
     # np.random.seed(21)
-    H, W = 4, 4
-    board = generate_one_goal_board(H, W, random=False)
+    
+    # H, W = 4, 4
+    # board = generate_one_goal_board(H, W, random=False)
     # board = generate_random_board(H, W, p_1=.2, p_2=.1)
         
-    model = Grid_world(board,
-                       gamma,
-                       win_reward=1,
-                       punish_reward=-1,
-                       entropy_coeff=entropy_coeff)  
+    # model = Grid_world(board,
+    #                    gamma,
+    #                    win_reward=1,
+    #                    punish_reward=-1,
+    #                    entropy_coeff=entropy_coeff)  
+    
+    model = TrivialMDP(S_size=S_size, A_size=A_size, gamma=gamma, seed=seed)
     
     # # Compute the beta.
     # f = lambda x: np.exp(-2*x * (1+entropy_coeff * np.log(A_size)) / (1-gamma)**2) - entropy_coeff * x / (2*(1-gamma))
@@ -229,7 +232,7 @@ if __name__ == '__main__':
     
     run(
         model=model,
-        max_iter=3000,
+        max_iter=30,
         param_list=[
             # [{"alg": "escort", "p": 4}, 1],
             # [{"alg": "phi", "label": "Poly(2)", "phi": phi_poly_factory(2)}, 0.01],
@@ -239,15 +242,15 @@ if __name__ == '__main__':
             # [{"alg": "policy_descent"}, 10],
             # [{"alg": "softmax_adaptive", "label": "reshaped SPG"}, 1],
             # [{"alg": "softmax", "label": "$\eta=0.01$"}, 0.1],
-            # [{"alg": "mirror_descent", "label": "Tsallis q=1.5", "mirror_funcs": tsallis_entropy_funcs_factory(1.5)}, 10],
+            [{"alg": "mirror_descent", "label": "Tsallis q=1.5", "mirror_funcs": tsallis_entropy_funcs_factory(1.5)}, 10],
             # [{"alg": "mirror_descent", "label": "Tsallis q=2", "mirror_funcs": tsallis_entropy_funcs_factory(2)}, 2],
             # [{"alg": "mirror_descent", "label": "Tsallis q=3", "mirror_funcs": tsallis_entropy_funcs_factory(3)}, 10],
             # [{"alg": "mirror_descent", "label": "Tsallis q=0.5", "mirror_funcs": tsallis_entropy_funcs_factory(0.5)}, 10],
             # [{"alg": "mirror_descent", "label": "Shannon", "mirror_funcs": shannon_entropy_funcs_factory()}, 10],
             # [{"alg": "mirror_descent", "label": "Fermi-Dirac", "mirror_funcs": fermi_dirac_entropy_funcs_factory()}, 10],
-            [{"alg": "mirror_descent", "label": "Hellinger", "mirror_funcs": hellinger_funcs_factory()}, 10],
+            # [{"alg": "mirror_descent", "label": "Hellinger", "mirror_funcs": hellinger_funcs_factory()}, 10],
             # [{"alg": "mirror_descent", "label": "log-bariier", "mirror_funcs": log_barrier_funcs_factory()}, 10],
-            # [{"alg": "projected_Q_descent", "label": "Projected Q-descent"}, 1],
+            # [{"alg": "projected_Q_descent", "label": "Projected Q-descent"}, 10],
         ],
         metric="rho",
         exp_mode="policy-converge-states",
